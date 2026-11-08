@@ -85,3 +85,24 @@ def test_script_start_hands_over_at_phase():
     assert 4 <= info["start_phase"] <= 7
     _, _, _, _, info = w.step(np.zeros(5))
     assert "start_phase" in info
+
+
+def test_demo_buffer_mixes_batches_and_critic_has_layernorm():
+    pytest.importorskip("stable_baselines3")
+    from stable_baselines3 import SAC
+    from torch import nn
+
+    from pensig.curriculum import ScriptStart
+    from pensig.rlpd import DemoMixBuffer, LNSACPolicy
+
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=5)
+    demo, wins = w.script_episodes(1)
+    n = len(demo["obs"])
+    assert n > 10 and demo["done"][-1] == 1 and set(np.unique(demo["act"][:, 4])) <= {-1.0, 1.0}
+    model = SAC(LNSACPolicy, w, buffer_size=1000, batch_size=8, learning_starts=0,
+                replay_buffer_class=DemoMixBuffer, replay_buffer_kwargs=dict(demo_ratio=0.5), device="cpu")
+    assert any(isinstance(m, nn.LayerNorm) for m in model.critic.modules())
+    model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"])
+    model.learn(16)
+    batch = model.replay_buffer.sample(8)
+    assert batch.observations.shape == (8, 29) and batch.rewards.shape == (8, 1)

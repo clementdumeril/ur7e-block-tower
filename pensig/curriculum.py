@@ -168,6 +168,30 @@ class ScriptStart(gym.Wrapper):
             if term or trunc:
                 return
 
+    def script_episodes(self, n: int) -> tuple[dict, int]:
+        """n episodes driven by the script from the plain reset, random sizes, as replay transitions (obs, act,
+        rew, next, done: terminated or out of time). Returns them and the number of successes."""
+        e = self.env.unwrapped
+        out = {k: [] for k in ("obs", "act", "rew", "next", "done")}
+        wins = 0
+        for _ in range(n):
+            self._new_sizes()
+            obs, _ = self.env.reset()
+            self.script.reset()
+            noise = self.rng.choice(self.noise)
+            done = False
+            while not done:
+                a = self.script(e)
+                a[:4] = np.clip(a[:4] + noise * self.rng.standard_normal(4), -1, 1)
+                a = binary_grip(self.env, a)
+                nxt, r, term, trunc, info = self.env.step(a)
+                done = term or trunc
+                for k, v in zip(out, (obs, a, r, nxt, done)):
+                    out[k].append(v)
+                obs = nxt
+            wins += bool(info["is_success"])
+        return {k: np.asarray(v, np.float32) for k, v in out.items()}, wins
+
     def step(self, action):
         obs, r, term, trunc, info = self.env.step(binary_grip(self.env, action))
         info["start_phase"] = self.start_phase

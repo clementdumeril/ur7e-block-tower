@@ -67,10 +67,10 @@ def resume_from(run: Path):
     return zip_, stats, (log[-1]["level"] if log else 0)
 
 
-def evaluate_phases(run: Path, episodes: int, seed: int = 20_000) -> dict:
+def evaluate_phases(run: Path, episodes: int, seed: int = 20_000, loader=load_policy) -> dict:
     """The newest model of a run, started at each script phase in turn (random sizes): where does it fail?"""
     zip_, stats, level = resume_from(run) if run.is_dir() else (run, run.parent / "vecnormalize.pkl", None)
-    policy = load_policy(zip_)
+    policy = loader(zip_)
     w = ScriptStart(TowerEnv(TowerConfig()), seed=seed)
     out = {"model": str(zip_), "level": level}
     for p in [*range(N_PHASES - 1, -1, -1), -1]:
@@ -93,9 +93,9 @@ def evaluate_phases(run: Path, episodes: int, seed: int = 20_000) -> dict:
     return out
 
 
-def evaluate(path: Path, towers: int, seed: int = 10_000) -> dict:
+def evaluate(path: Path, towers: int, seed: int = 10_000, loader=load_policy) -> dict:
     """Full towers from the plain reset, the policy alone, on the measured blocks and on random ones."""
-    policy = load_policy(path)
+    policy = loader(path)
     env = TowerEnv(TowerConfig())
     rng = np.random.default_rng(seed)
     out = {}

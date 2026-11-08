@@ -6,6 +6,8 @@ phase 4, 0 % from phase 3 after 20M more steps). Start phases are also drawn mor
 That alone did not stop it (tower_cur_40978032: phases 2-4 fell to 1-16 % at level 5 while 5-7 stayed above
 80 %): with gamma 0.98 and no cost for running out of time, hovering until the time limit was worth as much as a
 grasp 70 steps from success. Hence gamma 0.995 and a timeout penalty equal to the failure penalty.
+That did not stop it either (tower_cur_41005533: phases 2-3 at 0 %), so the gripper is now open/closed as on the
+lab arm (pensig.curriculum.binary_grip), and the log has the failure reasons per start phase and the action std.
 Block sizes are random at every reset. At the end, full towers from the plain reset, the two stages chained and
 no script anywhere, on the measured lab blocks and on random ones.
 
@@ -29,7 +31,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from evaluate import load_policy  # noqa: E402
 from pensig.config import TowerConfig  # noqa: E402
-from pensig.curriculum import MAX_LEVEL, N_PHASES, ScriptStart, frontier, random_sizes  # noqa: E402
+from pensig.curriculum import MAX_LEVEL, N_PHASES, ScriptStart, binary_grip, frontier, random_sizes  # noqa: E402
 from pensig.tower import TowerEnv  # noqa: E402
 
 MEASURED = {"base_size": (0.05, 0.05), "mid_size": (0.04, 0.08), "top_size": (0.035, 0.03)}
@@ -109,7 +111,7 @@ def evaluate(path: Path, towers: int, seed: int = 10_000) -> dict:
                     obs, _ = env.next_stage()
                 done = False
                 while not done:
-                    obs, _, term, trunc, info = env.step(policy(env, obs))
+                    obs, _, term, trunc, info = env.step(binary_grip(env, policy(env, obs)))
                     done = term or trunc
                 stage_ok[stage].append(bool(info["is_success"]))
                 if not info["is_success"]:
@@ -182,6 +184,7 @@ def main():
             super().__init__()
             self.level = args.level
             self.phase = {p: deque(maxlen=args.window) for p in range(-1, N_PHASES)}  # successes per start phase
+            self.why = {p: deque(maxlen=args.window) for p in range(-1, N_PHASES)}  # outcome per start phase
             self.all, self.log, self.t0 = deque(maxlen=1000), [], time.time()
 
         def active(self):
@@ -190,9 +193,11 @@ def main():
         def _on_step(self) -> bool:
             for done, info in zip(self.locals["dones"], self.locals["infos"]):
                 if done:
-                    ok = bool(info.get("is_success"))
+                    ok, p = bool(info.get("is_success")), info.get("start_phase", -1)
                     self.all.append(ok)
-                    self.phase[info.get("start_phase", -1)].append(ok)
+                    self.phase[p].append(ok)
+                    self.why[p].append("ok" if ok else info.get("failure") or (
+                        "stop" if info.get("stopped") else "unstable" if info.get("unstable") else "timeout"))
             act = self.active()
             if (self.level < MAX_LEVEL and all(len(self.phase[p]) == args.window for p in act)
                     and min(np.mean(self.phase[p]) for p in act) >= args.threshold):
@@ -211,6 +216,9 @@ def main():
             mean = lambda q: round(float(np.mean(q)), 2) if q else None  # noqa: E731
             entry = {"steps": self.num_timesteps, "level": self.level, "all_success": mean(self.all),
                      "success_by_start": {p: mean(self.phase[p]) for p in self.active()},
+                     "outcomes_by_start": {p: {k: self.why[p].count(k) for k in sorted(set(self.why[p]))}
+                                           for p in self.active()},
+                     "action_std": [round(float(x), 2) for x in model.policy.log_std.exp().detach().numpy()],
                      "minutes": round((time.time() - self.t0) / 60, 1)}
             self.log.append(entry)
             print(json.dumps(entry), what, flush=True)

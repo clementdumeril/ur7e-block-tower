@@ -59,6 +59,21 @@ def restore(e, s: dict):
     mujoco.mj_forward(e.model, e.data)
 
 
+def binary_grip(env, action, threshold: float = 0.5) -> np.ndarray:
+    """The gripper as on the lab arm (/toggle_gripper, tower_ros.policy.GripperModel): closed at full speed once the
+    command goes below -threshold, open above +threshold, unchanged in between. With the sim's finger speed taken
+    as is, PPO exploring around -0.3 got weak grips that slipped, and learned that closing on a block fails.
+    Stateless: the last applied command (TowerEnv.prev_action) holds the state, so restored states keep theirs."""
+    a = np.clip(np.array(action, dtype=np.float64), -1.0, 1.0)
+    closed = env.unwrapped.prev_action[4] < 0
+    if a[4] < -threshold:
+        closed = True
+    elif a[4] > threshold:
+        closed = False
+    a[4] = -1.0 if closed else 1.0
+    return a
+
+
 def frontier(level: int) -> int:
     """The earliest start phase at this level, -1 for the plain reset."""
     return N_PHASES - 1 - level if level < N_PHASES else -1
@@ -154,6 +169,6 @@ class ScriptStart(gym.Wrapper):
                 return
 
     def step(self, action):
-        obs, r, term, trunc, info = self.env.step(action)
+        obs, r, term, trunc, info = self.env.step(binary_grip(self.env, action))
         info["start_phase"] = self.start_phase
         return obs, r, term, trunc, info

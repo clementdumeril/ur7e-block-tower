@@ -1,7 +1,7 @@
 [project]
 name = "pensig"
 version = "0.1.0"
-description = "A UR arm that picks up a pen with a learned grasp and signs with it"
+description = "MuJoCo replica of a UR7e cell and RL (PPO) for stacking a three-block tower, with a ROS 2 package for the real arm"
 requires-python = ">=3.10"
 dependencies = [
     "mujoco>=3.2",

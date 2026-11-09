@@ -125,7 +125,7 @@ class DemoSAC(SAC):
             self.actor.optimizer.zero_grad()
             bc.backward()
             self.actor.optimizer.step()
-            losses.append(float(bc))
+            losses.append(bc.item())
         return float(np.mean(losses[-100:])) if losses else float("nan")
 
     def train(self, gradient_steps: int, batch_size: int = 64) -> None:
@@ -172,7 +172,7 @@ class DemoSAC(SAC):
             if self.bc_weight > 0 and n_demo > 0:
                 bc, kept = self.bc_term(data.observations[-n_demo:], self.replay_buffer.last_clean)
                 actor_loss = actor_loss / q_pi.abs().mean().detach().clamp(min=1.0) + self.bc_weight * bc
-                self.bc_stats["bc"].append(float(bc))
+                self.bc_stats["bc"].append(bc.item())
                 self.bc_stats["kept"].append(kept)
             actor_losses.append(actor_loss.item())
             self.actor.optimizer.zero_grad()

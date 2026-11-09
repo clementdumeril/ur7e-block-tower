@@ -85,7 +85,7 @@ class ScriptStart(gym.Wrapper):
     """TowerEnv whose episodes start where the script hands over. info["start_phase"]: -1 for the plain reset."""
 
     def __init__(self, env, sizes: dict | None = None, noise=(0.0, 0.1), save_prob: float = 0.25, uses: int = 6,
-                 pool: int = 40, seed: int = 0):
+                 pool: int = 40, seed: int = 0, chain: float = 0.5):
         super().__init__(env)
         self.sizes = sizes  # None: random sizes at every reset
         self.noise = noise
@@ -99,6 +99,11 @@ class ScriptStart(gym.Wrapper):
         self.fixed_phase = None  # set: every episode starts at this phase (evaluation)
         self.weights = None  # per start phase -1..7: more episodes where the policy fails more
         self.start_phase = -1
+        # After the policy's own stage 0 success, the next episode is often stage 1 from that state, as at run
+        # time: tower_sac_41037952 placed the first block 79 % of the time and the second 1 %, having only seen
+        # stage 1 start on a tower the reset had built, with the gripper away from it.
+        self.chain = chain
+        self._chain_ready = False
 
     def set_level(self, level: int):
         self.level = int(level)
@@ -125,6 +130,13 @@ class ScriptStart(gym.Wrapper):
         e = self.env.unwrapped
         if seed is not None:
             self.rng = np.random.default_rng(seed)
+        chain, self._chain_ready = self._chain_ready, False
+        if chain and self.fixed_phase is None and self.rng.random() < self.chain:
+            obs, info = e.next_stage()
+            self.start_phase = -1
+            info["start_phase"] = -1
+            info["chained"] = True
+            return obs, info
         p = self._sample_phase()
         for _ in range(10):
             if p < 0 or self.pool[p]:
@@ -199,4 +211,5 @@ class ScriptStart(gym.Wrapper):
     def step(self, action):
         obs, r, term, trunc, info = self.env.step(binary_grip(self.env, action))
         info["start_phase"] = self.start_phase
+        self._chain_ready = bool(info["is_success"]) and self.env.unwrapped.stage == 0
         return obs, r, term, trunc, info

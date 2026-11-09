@@ -87,6 +87,26 @@ def test_script_start_hands_over_at_phase():
     assert "start_phase" in info
 
 
+def test_stage_one_follows_the_policys_own_stage_zero():
+    from pensig.curriculum import ScriptStart
+
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=4, chain=1.0)
+    w.fixed_phase = 6  # the script opens and lifts: success within a few steps
+    w.reset(seed=4, options={"stage": 0})
+    e = w.unwrapped
+    assert e.stage == 0
+    done = False
+    while not done:
+        _, _, term, trunc, info = w.step(w.script(e))
+        done = term or trunc
+    assert info["is_success"]
+    w.fixed_phase = None
+    obs, info = w.reset()
+    assert info.get("chained") and e.stage == 1 and e.t == 0 and info["start_phase"] == -1
+    _, info = w.reset()
+    assert not info.get("chained")  # only right after a stage 0 success
+
+
 def test_demo_buffer_mixes_batches_and_critic_has_layernorm():
     pytest.importorskip("stable_baselines3")
     from stable_baselines3 import SAC

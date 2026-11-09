@@ -32,7 +32,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from train_tower_curriculum import evaluate, evaluate_phases, make_env  # noqa: E402
 from pensig.config import TowerConfig  # noqa: E402
-from pensig.curriculum import MAX_LEVEL, N_PHASES, frontier  # noqa: E402
+from pensig.curriculum import MAX_LEVEL, N_PHASES, ScriptStart, frontier  # noqa: E402
+from pensig.tower import TowerEnv  # noqa: E402
 
 
 def stats_for(path: Path) -> Path:
@@ -77,6 +78,8 @@ def main():
     ap.add_argument("--buffer", type=int, default=3_000_000)
     ap.add_argument("--threads", type=int, default=8, help="torch threads for the gradient steps")
     ap.add_argument("--threshold", type=float, default=0.5, help="success from every start phase in use to level up")
+    ap.add_argument("--gate-every", type=int, default=200_000, help="steps between deterministic gate checks")
+    ap.add_argument("--gate-episodes", type=int, default=20, help="deterministic episodes per start phase")
     ap.add_argument("--window", type=int, default=200, help="episodes per start phase that count")
     ap.add_argument("--gamma", type=float, default=0.99, help="SAC discount, also the reward shaping one")
     ap.add_argument("--timeout-penalty", type=float, default=3.0, help="reward lost when the steps run out")
@@ -151,9 +154,36 @@ def main():
             self.why = {p: deque(maxlen=args.window) for p in range(-1, N_PHASES)}  # outcome per start phase
             self.all, self.log, self.t0 = deque(maxlen=1000), [], time.time()
             self.next_print = 0
+            self.next_gate = args.gate_every
+            self.det = {}
+            cfg = TowerConfig()
+            cfg.shaping_gamma, cfg.timeout_penalty = args.gamma, args.timeout_penalty
+            self.gate_env = ScriptStart(TowerEnv(cfg), seed=args.seed + 99_000)
 
         def active(self):
             return range(frontier(min(self.level, MAX_LEVEL - 1)), N_PHASES)
+
+        def gate(self) -> dict:
+            """Success of the deterministic policy, the one the arm runs, from each start phase in use. The
+            training episodes use sampled actions: in tower_sac_41037952 they succeeded 5-44 % from the grasp
+            phases while the deterministic policy built the first block 79 % of the time from the plain reset,
+            and the gate on them held the curriculum at level 6 for 12 hours."""
+            w, out = self.gate_env, {}
+            phases = [*self.active()]
+            for p in phases:
+                w.fixed_phase = p
+                ok = 0
+                for _ in range(args.gate_episodes):
+                    obs, _ = w.reset()
+                    done = False
+                    while not done:
+                        a = model.predict(venv.normalize_obs(obs), deterministic=True)[0]
+                        obs, _, term, trunc, info = w.step(a)
+                        done = term or trunc
+                    ok += bool(info["is_success"])
+                out[p] = round(ok / args.gate_episodes, 2)
+            w.fixed_phase = None
+            return out
 
         def _on_step(self) -> bool:
             for done, info in zip(self.locals["dones"], self.locals["infos"]):
@@ -163,13 +193,14 @@ def main():
                     self.phase[p].append(ok)
                     self.why[p].append("ok" if ok else info.get("failure") or (
                         "stop" if info.get("stopped") else "unstable" if info.get("unstable") else "timeout"))
-            act = self.active()
-            if (self.level < MAX_LEVEL and all(len(self.phase[p]) == args.window for p in act)
-                    and min(np.mean(self.phase[p]) for p in act) >= args.threshold):
-                self.level += 1
-                self.phase[frontier(min(self.level, MAX_LEVEL - 1))].clear()
-                venv.env_method("set_level", self.level)
-                self._print(f"level up -> {self.level}")
+            if self.num_timesteps >= self.next_gate and self.level < MAX_LEVEL:
+                self.next_gate = self.num_timesteps + args.gate_every
+                self.det = self.gate()
+                if min(self.det.values()) >= args.threshold:
+                    self.level += 1
+                    self.phase[frontier(min(self.level, MAX_LEVEL - 1))].clear()
+                    venv.env_method("set_level", self.level)
+                    self._print(f"level up -> {self.level}")
             if self.n_calls % 200 == 0:
                 venv.env_method("set_weights", self.weights())
             if self.num_timesteps >= self.next_print:
@@ -192,6 +223,7 @@ def main():
                 std = [round(float(x), 2) for x in std]
             entry = {"steps": self.num_timesteps, "level": self.level, "all_success": mean(self.all),
                      "success_by_start": {p: mean(self.phase[p]) for p in self.active()},
+                     "deterministic_by_start": self.det,
                      "outcomes_by_start": {p: {k: self.why[p].count(k) for k in sorted(set(self.why[p]))}
                                            for p in self.active()},
                      "action_std": std, "alpha": round(float(model.log_ent_coef.detach().exp()), 4),

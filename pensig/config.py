@@ -107,6 +107,10 @@ class TowerConfig:
     latency_prob: float = 0.3
 
     stop_force: float = 25.0
+    # MuJoCo noslip passes, the scene's 5. Divergent grasps (block speeds up to 1e8 m/s, seen by the learned
+    # policies as protective stops) came from stale mass-derived constants, fixed in TowerEnv._randomize; with
+    # that fix, 99 of 100 noisy grasps with 5, 93 with 0.
+    noslip_iterations: int = 5
 
     place_tol: float = 0.008
     place_yaw_tol: float = float(np.deg2rad(10.0))

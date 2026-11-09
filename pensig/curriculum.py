@@ -35,7 +35,9 @@ def random_sizes(rng) -> dict:
 
 # What a reset changes in the model (TowerEnv._randomize) and in the data, plus the env's own state.
 MODEL_FIELDS = ("geom_size", "geom_aabb", "geom_rbound", "geom_friction", "body_mass", "body_inertia", "body_ipos",
-                "body_iquat", "actuator_forcerange")
+                "body_iquat", "actuator_forcerange",
+                # derived from the masses by mj_setConst at reset (TowerEnv._randomize)
+                "body_subtreemass", "body_invweight0", "dof_invweight0", "dof_M0")
 DATA_FIELDS = ("qpos", "qvel", "act", "ctrl", "qacc_warmstart")
 STATIC = {"model", "data", "ik", "render_mode", "n_sub", "finger_qadr", "qadr", "dadr", "arm_act", "grip_act",
           "tcp_sid", "ft_adr", "gid", "bid", "gripper_geoms", "pad_geoms", "action_space", "observation_space",

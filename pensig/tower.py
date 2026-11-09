@@ -58,6 +58,7 @@ class TowerEnv(gym.Env):
         self.render_mode = render_mode
         self.model = build_model(WORLD_XML)
         self.model.opt.timestep = self.cfg.sim_dt
+        self.model.opt.noslip_iterations = self.cfg.noslip_iterations
         self.data = mujoco.MjData(self.model)
         self.n_sub = int(round(self.cfg.control_dt / self.cfg.sim_dt))
         self.ik = DiffIK(self.model)
@@ -141,6 +142,10 @@ class TowerEnv(gym.Env):
             m.geom_friction[self.gid[pad], 0] = u(cfg.pad_friction)
         force = u(cfg.grip_force)
         m.actuator_forcerange[self.grip_act] = (-force, force)
+        # The contact softness MuJoCo derives from the masses (body_invweight0 and co) is computed at compile
+        # time, for 30 g blocks. Left there, a 50-60 g block held off-centre made the solver diverge: 22 of 100
+        # noisy grasps, most of them on heavy blocks. Recompute it for the new masses and sizes.
+        mujoco.mj_setConst(m, d)
 
         on_table = ["green", "black", "red"] if stage == 0 else ["green", "red"]
         spots = []
@@ -276,7 +281,7 @@ class TowerEnv(gym.Env):
         self.t += 1
         self._read_force()
 
-        if self._unstable():
+        if self._unstable() or self._blown_up():
             # MuJoCo has already reset the state; end the episode without a learning signal.
             info = self._info(False)
             info["unstable"] = True
@@ -305,7 +310,7 @@ class TowerEnv(gym.Env):
         for k in range(self.n_sub):
             d.ctrl[self.arm_act] = self.q_cmd + (k + 1) / self.n_sub * (q_new - self.q_cmd)
             mujoco.mj_step(m, d)
-            if self._unstable():
+            if self._unstable() or self._blown_up():
                 break
             if self._protective_stop():
                 stopped = True
@@ -316,9 +321,12 @@ class TowerEnv(gym.Env):
     def _protective_stop(self) -> bool:
         """Like the UR protective stop: the gripper or the held block pressed hard against the table or
         another block, or a block knocked away. A released block falling onto the tower does not count: the arm
-        only feels the block while a finger touches it."""
+        only feels the block while a finger touches it. Nor does the held block's speed: the fingers closing or
+        opening on it give 2-3 m/s for one 2 ms step, harmless, and the UR does not watch blocks."""
         d = self.data
         for b in BLOCKS:
+            if b == self.held:
+                continue
             v = d.qvel[self.dadr[b]:self.dadr[b] + 3]
             if v @ v > 4.0:
                 return True
@@ -334,6 +342,12 @@ class TowerEnv(gym.Env):
         adr = adr[adr >= 0]
         # With elliptic cones the first constraint row of a contact is its normal force.
         return bool(adr.size and d.efc_force[adr].max() > self.cfg.stop_force)
+
+    def _blown_up(self) -> bool:
+        """A block faster than 10 m/s: the solver diverged, nothing the arm did. Ends the episode as unstable,
+        without the protective stop's penalty."""
+        v = self.data.qvel
+        return any(v[self.dadr[b]:self.dadr[b] + 3] @ v[self.dadr[b]:self.dadr[b] + 3] > 100.0 for b in BLOCKS)
 
     def _unstable(self) -> bool:
         w = self.data.warning

@@ -278,7 +278,7 @@ def test_obs_and_trigger_match_tower_env():
         opening = env.data.qpos[env.finger_qadr[0]] / MAX_OPEN
         np.testing.assert_allclose(s.obs(tcp, env.tcp_yaw(), opening), env._obs(), atol=1e-5)
         a = sim_script(env)
-        np.testing.assert_allclose(my_script(s), a, atol=1e-9)
+        np.testing.assert_allclose(my_script(s), a, atol=1e-7)  # float rounding in the estimates: ~1e-9 at times
         env.step(a)
         s.target_pos, s.target_yaw = step_target(s.target_pos, s.target_yaw, a, cfg)
         np.testing.assert_allclose(s.target_pos, env.target_pos, atol=1e-12)

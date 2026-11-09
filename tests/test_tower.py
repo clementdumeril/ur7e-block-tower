@@ -106,3 +106,29 @@ def test_demo_buffer_mixes_batches_and_critic_has_layernorm():
     model.learn(16)
     batch = model.replay_buffer.sample(8)
     assert batch.observations.shape == (8, 29) and batch.rewards.shape == (8, 1)
+
+
+def test_demo_sac_clones_the_script_and_trains_with_the_bc_term():
+    pytest.importorskip("stable_baselines3")
+    import torch
+
+    from pensig.curriculum import ScriptStart
+    from pensig.rlpd import DemoMixBuffer, DemoSAC, LNSACPolicy
+
+    torch.manual_seed(0)
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=5)
+    demo, _ = w.script_episodes(2)
+    model = DemoSAC(LNSACPolicy, w, buffer_size=1000, batch_size=32, learning_starts=0,
+                    replay_buffer_class=DemoMixBuffer, replay_buffer_kwargs=dict(demo_ratio=0.5), device="cpu",
+                    bc_weight=1.0, q_filter=True)
+    assert np.array_equal(demo["clean"][:, 4], demo["act"][:, 4])  # the noise is only on the motion
+    model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"], demo["clean"])
+    obs, act = (torch.as_tensor(demo[k]) for k in ("obs", "clean"))
+    before = float(model.bc_term(obs, act)[0])
+    model.pretrain_bc(300, 64)
+    after = float(model.bc_term(obs, act)[0])
+    assert after < 0.5 * before
+    model.learn(16)
+    stats = model.pop_bc_stats()
+    assert stats["bc"] is not None and 0.0 <= stats["kept"] <= 1.0
+    assert model.replay_buffer.last_n_demo == 16

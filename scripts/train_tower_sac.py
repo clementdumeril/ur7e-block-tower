@@ -6,6 +6,9 @@ lost the grasp phases at level 5 in four runs, with its action std down to 0.07.
 play `--demos` script episodes from the plain reset; half of every SAC batch is drawn from them.
 Timeouts end the episode without bootstrapping: the step count is in the observation.
 Gradient steps are the cost on CPU (about 40/s here for a 256x256 SAC, batch 256), hence UTD 0.25 by default.
+With demonstrations in the buffer only, the grasp phases were lost again (tower_sac_41035915); the actor now
+starts as a behaviour-cloned copy of the script (`--bc-pretrain`) and keeps a cloning term on the demonstration
+half of every batch (`--bc`, pensig.rlpd.DemoSAC).
 
 python scripts/train_tower_sac.py --out runs/tower_sac --timesteps 20000000
 python scripts/train_tower_sac.py --resume runs/tower_sac/checkpoints/sac_5000000_steps.zip --level 4 --out runs/s2
@@ -41,9 +44,9 @@ def stats_for(path: Path) -> Path:
 
 
 def load_sac(path: Path):
-    from stable_baselines3 import SAC
+    from pensig.rlpd import DemoSAC
 
-    model = SAC.load(path, device="cpu")
+    model = DemoSAC.load(path, device="cpu")
     with open(stats_for(path), "rb") as f:
         norm = pickle.load(f)
 
@@ -65,6 +68,9 @@ def main():
     ap.add_argument("--resume", type=Path, help="SAC model zip to continue from (its VecNormalize stats next to it)")
     ap.add_argument("--demos", type=int, default=2000, help="script episodes for the demonstration buffer")
     ap.add_argument("--demo-ratio", type=float, default=0.5, help="share of every batch from the demonstrations")
+    ap.add_argument("--bc", type=float, default=0.4, help="weight of the cloning term (TD3+BC: 0.4), 0: plain SAC")
+    ap.add_argument("--q-filter", action="store_true", help="clone only where the critic prefers the script")
+    ap.add_argument("--bc-pretrain", type=int, default=50_000, help="actor-only cloning steps before training")
     ap.add_argument("--utd", type=float, default=0.25, help="gradient steps per environment step")
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--net", type=int, nargs="+", default=[256, 256], help="hidden layers, actor and critics")
@@ -89,11 +95,10 @@ def main():
         return
 
     import torch
-    from stable_baselines3 import SAC
     from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
     from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
 
-    from pensig.rlpd import DemoMixBuffer, LNSACPolicy
+    from pensig.rlpd import DemoMixBuffer, DemoSAC, LNSACPolicy
 
     torch.set_num_threads(args.threads)
     args.out.mkdir(parents=True, exist_ok=True)
@@ -114,21 +119,29 @@ def main():
     if args.resume:
         venv = VecNormalize.load(str(stats_for(args.resume)), venv)
         venv.norm_reward = False
-        model = SAC.load(args.resume, env=venv, device="cpu")
+        model = DemoSAC.load(args.resume, env=venv, device="cpu")
         model.learning_starts = model.num_timesteps + 20_000  # refill the online buffer first
         model.tensorboard_log = str(args.out)
+        model.bc_weight, model.q_filter, model.bc_stats = args.bc, args.q_filter, {"bc": [], "kept": []}
         print(f"resuming from {args.resume} at level {args.level}", flush=True)
     else:
         venv = VecNormalize(venv, norm_obs=True, norm_reward=False, clip_obs=10.0, gamma=args.gamma)
         venv.obs_rms.update(demo["obs"])
-        model = SAC(LNSACPolicy, venv, buffer_size=args.buffer, batch_size=args.batch, learning_rate=3e-4,
-                    gamma=args.gamma, tau=0.005, learning_starts=20_000, train_freq=1,
-                    gradient_steps=max(1, round(args.utd * args.n_envs)), ent_coef="auto",
-                    replay_buffer_class=DemoMixBuffer,
-                    replay_buffer_kwargs=dict(demo_ratio=args.demo_ratio, handle_timeout_termination=False),
-                    policy_kwargs=dict(net_arch=args.net), seed=args.seed, device="cpu", verbose=0,
-                    tensorboard_log=str(args.out))
-    model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"])
+        model = DemoSAC(LNSACPolicy, venv, buffer_size=args.buffer, batch_size=args.batch, learning_rate=3e-4,
+                        gamma=args.gamma, tau=0.005, learning_starts=20_000, train_freq=1,
+                        gradient_steps=max(1, round(args.utd * args.n_envs)), ent_coef="auto",
+                        replay_buffer_class=DemoMixBuffer,
+                        replay_buffer_kwargs=dict(demo_ratio=args.demo_ratio, handle_timeout_termination=False),
+                        policy_kwargs=dict(net_arch=args.net), seed=args.seed, device="cpu", verbose=0,
+                        tensorboard_log=str(args.out), bc_weight=args.bc, q_filter=args.q_filter)
+    model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"], demo["clean"])
+    if args.bc_pretrain and not args.resume:
+        t0 = time.time()
+        loss = model.pretrain_bc(args.bc_pretrain, args.batch)
+        print(f"behaviour cloning: {args.bc_pretrain} steps, loss {loss:.4f}, {(time.time() - t0) / 60:.1f} min",
+              flush=True)
+        model.save(args.out / "bc_model")
+        venv.save(str(args.out / "bc_vecnormalize.pkl"))
 
     class Curriculum(BaseCallback):
         def __init__(self):
@@ -182,6 +195,7 @@ def main():
                      "outcomes_by_start": {p: {k: self.why[p].count(k) for k in sorted(set(self.why[p]))}
                                            for p in self.active()},
                      "action_std": std, "alpha": round(float(model.log_ent_coef.detach().exp()), 4),
+                     **model.pop_bc_stats(),
                      "minutes": round((time.time() - self.t0) / 60, 1)}
             self.log.append(entry)
             print(json.dumps(entry), what, flush=True)

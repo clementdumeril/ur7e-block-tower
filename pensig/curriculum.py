@@ -172,9 +172,11 @@ class ScriptStart(gym.Wrapper):
 
     def script_episodes(self, n: int) -> tuple[dict, int]:
         """n episodes driven by the script from the plain reset, random sizes, as replay transitions (obs, act,
-        rew, next, done: terminated or out of time). Returns them and the number of successes."""
+        rew, next, done: terminated or out of time) plus "clean", the script's action before the noise, to clone
+        (the noise spreads the states, the label stays the script's: DART, Laskey et al. 2017).
+        Returns them and the number of successes."""
         e = self.env.unwrapped
-        out = {k: [] for k in ("obs", "act", "rew", "next", "done")}
+        out = {k: [] for k in ("obs", "act", "rew", "next", "done", "clean")}
         wins = 0
         for _ in range(n):
             self._new_sizes()
@@ -183,12 +185,12 @@ class ScriptStart(gym.Wrapper):
             noise = self.rng.choice(self.noise)
             done = False
             while not done:
-                a = self.script(e)
+                a = binary_grip(self.env, self.script(e))
+                clean = a.copy()
                 a[:4] = np.clip(a[:4] + noise * self.rng.standard_normal(4), -1, 1)
-                a = binary_grip(self.env, a)
                 nxt, r, term, trunc, info = self.env.step(a)
                 done = term or trunc
-                for k, v in zip(out, (obs, a, r, nxt, done)):
+                for k, v in zip(out, (obs, a, r, nxt, done, clean)):
                     out[k].append(v)
                 obs = nxt
             wins += bool(info["is_success"])

@@ -1,4 +1,4 @@
-"""Camera, wrist TF, block perception and MoveIt for the tower, modeled on lab5_bringup.launch.py.
+"""Camera, wrist TF, block perception and MoveIt for the tower.
 
 The tower node itself reads Enter from the terminal in step mode, so it runs in its own terminal:
   ros2 run tower_ros tower --ros-args --params-file $(ros2 pkg prefix tower_ros)/share/tower_ros/config/tower.yaml
@@ -15,7 +15,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-# wrist_3_link -> camera_depth_optical_frame, identity rotation, as lab 5's static_tf_transform.py (planning tf).
+# wrist_3_link -> camera_depth_optical_frame, identity rotation, as the lab workspace's planning tf node.
 # Keep it equal to camera_offset in config/tower.yaml.
 CAMERA_OFFSET = ("-0.025", "0.13", "0.0")
 
@@ -36,8 +36,8 @@ def generate_launch_description():
 
     # The RealSense publishes its own camera_link -> camera_depth_frame -> camera_depth_optical_frame tree. A
     # static wrist_3_link -> camera_depth_optical_frame then races its static parent, so the depth frame can
-    # end up hanging off camera_link, away from the arm. Lab 5 avoided that with planning's tf node, which
-    # re-publishes the wrist link at 20 Hz (lab 5's TF tree dumps show it winning): use it when it is there.
+    # end up hanging off camera_link, away from the arm. The lab workspace's planning tf node re-publishes the
+    # wrist link at 20 Hz and wins that race: use it when it is there.
     try:
         get_package_share_directory("planning")
         camera_tf = Node(package="planning", executable="tf", name="wrist_camera_tf", output="screen")
@@ -68,7 +68,7 @@ def generate_launch_description():
 
     actions = [realsense_launch, camera_tf, perception_node, moveit_launch]
 
-    # Table, wall and gripper collision boxes from lab 5, when its planning package is in the workspace.
+    # Table, wall and gripper collision boxes, when the lab workspace's planning package is there.
     try:
         planning_share = get_package_share_directory("planning")
         actions.append(Node(
@@ -79,9 +79,9 @@ def generate_launch_description():
             parameters=[{"obstacles_config": os.path.join(planning_share, "config", "obstacles.yaml")}],
         ))
     except PackageNotFoundError:
-        print("[tower_bringup] lab 5 'planning' package not found: no collision boxes in MoveIt")
+        print("[tower_bringup] 'planning' package not found: no collision boxes in MoveIt")
 
-    # Global shutdown on any process exit, as lab 5
+    # Global shutdown on any process exit
     actions.append(RegisterEventHandler(
         OnProcessExit(on_exit=[EmitEvent(event=Shutdown(reason="A launched process exited"))])))
     return LaunchDescription(actions)

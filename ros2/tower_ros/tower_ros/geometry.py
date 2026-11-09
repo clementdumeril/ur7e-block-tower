@@ -28,7 +28,7 @@ class BlockEstimate:
     y: float
     top: float  # z of the top face
     yaw: float  # top-face edge direction, modulo 90 deg
-    height: float  # top minus the table ring around the block
+    height: float  # top minus the table around the block
     n_points: int = 0
 
     @property
@@ -50,7 +50,7 @@ class ToolPose:
 # ---------------------------------------------------------------- orientation
 
 def quat_gripper_down(yaw: float) -> tuple:
-    """(x, y, z, w) of Rz(yaw) * (0, 1, 0, 0): lab 5's gripper-down quaternion turned about the vertical."""
+    """(x, y, z, w) of Rz(yaw) * (0, 1, 0, 0): the gripper-down quaternion turned about the vertical."""
     return (-math.sin(yaw / 2), math.cos(yaw / 2), 0.0, 0.0)
 
 
@@ -87,7 +87,7 @@ def tool_from_wrist(position, quat, gripper_length: float) -> ToolPose:
 def tool_for_camera_above(xy, camera_z: float, yaw: float, gripper_length: float, camera_offset) -> ToolPose:
     """Tool pose that puts the wrist camera straight above `xy` at height `camera_z`.
 
-    The RealSense sits camera_offset from wrist_3_link (lab 5: (-0.025, 0.13, 0), optical axis along the
+    The RealSense sits camera_offset from wrist_3_link ((-0.025, 0.13, 0) on the lab arm, optical axis along the
     wrist z), so with the fingertips above a block the camera looks 13 cm to the side of it. For the
     close-up the camera, not the gripper, goes above the block.
     """
@@ -142,14 +142,14 @@ def transform_points(points: np.ndarray, translation, quat) -> np.ndarray:
 
 
 def unpack_rgb(packed: np.ndarray) -> np.ndarray:
-    """RealSense packed 'rgb' float field to (N, 3) uint8 R, G, B, as lab 5 reads it."""
+    """RealSense packed 'rgb' float field to (N, 3) uint8 R, G, B."""
     u = np.ascontiguousarray(packed, dtype=np.float32).view(np.uint32)
     return np.stack([(u >> 16) & 255, (u >> 8) & 255, u & 255], axis=1).astype(np.uint8)
 
 
 def rgb_to_hsv(rgb: np.ndarray) -> np.ndarray:
-    """(N, 3) uint8 RGB to HSV in OpenCV's 8-bit convention (H 0..179, S and V 0..255), the one
-    lab 5's hsv_tuner shows, without needing cv2."""
+    """(N, 3) uint8 RGB to HSV in OpenCV's 8-bit convention (H 0..179, S and V 0..255),
+    without needing cv2."""
     c = rgb.astype(np.float32)
     r, g, b = c[:, 0], c[:, 1], c[:, 2]
     v = c.max(1)
@@ -175,7 +175,7 @@ class HsvThresholds:
     red_h_min: int = 170
     red_s_min: int = 120
     red_v_min: int = 50
-    # black by low V, as lab 5 found its cube (cube_max_v 80)
+    # black by low V
     black_v_max: int = 80
 
 
@@ -235,11 +235,11 @@ def top_face_rect(xy: np.ndarray, use_cv2: bool = True):
 
 
 def estimate_block(points: np.ndarray, mask: np.ndarray, any_block: np.ndarray, table_z: float,
-                   ring=(0.06, 0.15), table_tol: float = 0.03, top_band: float = 0.008,
+                   table_annulus=(0.06, 0.15), table_tol: float = 0.03, top_band: float = 0.008,
                    cluster_radius: float = 0.06, min_points: int = 30, top_offset: float = 0.0):
-    """One block from its color mask, as lab 5 found its cube: the top is a high percentile of the
+    """One block from its color mask: the top is a high percentile of the
     block points, the center comes from the top face only (the sides the camera sees would pull it toward
-    the camera), and the height is the top minus the median of a table ring around the block."""
+    the camera), and the height is the top minus the median of the table points in an annulus around the block."""
     pts = points[mask]
     if len(pts) < min_points:
         return None
@@ -254,7 +254,7 @@ def estimate_block(points: np.ndarray, mask: np.ndarray, any_block: np.ndarray, 
         return None
     (cx, cy), _, yaw = top_face_rect(face[:, :2])
     d = np.linalg.norm(points[:, :2] - [cx, cy], axis=1)
-    sel = (d >= ring[0]) & (d <= ring[1]) & ~any_block & (np.abs(points[:, 2] - table_z) < table_tol)
+    sel = (d >= table_annulus[0]) & (d <= table_annulus[1]) & ~any_block & (np.abs(points[:, 2] - table_z) < table_tol)
     local_table = float(np.median(points[sel, 2])) if sel.sum() >= min_points else table_z
     top += top_offset
     return BlockEstimate(cx, cy, top, yaw, top - local_table, int(len(pts)))
@@ -270,7 +270,7 @@ def combine_samples(samples) -> BlockEstimate:
 
 
 def marker_from_estimate(e: BlockEstimate):
-    """RViz CUBE marker center and z size: a box from the table ring up to the measured top."""
+    """RViz CUBE marker center and z size: a box from the table up to the measured top."""
     return (e.x, e.y, e.top - e.height / 2), e.height
 
 

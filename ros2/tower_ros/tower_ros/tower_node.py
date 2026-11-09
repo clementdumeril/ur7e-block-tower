@@ -1,4 +1,4 @@
-"""Runs the scripted block tower (tower_ros.script) on the real UR7e with lab 5's interfaces.
+"""Runs the scripted block tower (tower_ros.script) on the real UR7e with the lab cell's interfaces.
 
   MoveIt /compute_ik (group ur_manipulator, ik_link wrist_3_link, gripper down (0, 1, 0, 0) turned by
   the block yaw) and /plan_kinematic_path for the big moves; straight moves are IK waypoints sent as one
@@ -187,7 +187,7 @@ class TowerRobot(Node, Robot):
             raise TowerAbort("no wrench on the wrench topic: the touchdown needs it")
 
     def switch_to_trajectory_controller(self):
-        """After free drive the trajectory controller may be inactive (lab 5 does the same)."""
+        """After free drive the trajectory controller may be inactive."""
         if not self.switch_cli.wait_for_service(timeout_sec=5.0):
             self.get_logger().warn("No controller_manager, assuming scaled_joint_trajectory_controller is active")
             return

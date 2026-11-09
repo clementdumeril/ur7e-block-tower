@@ -1,21 +1,21 @@
 # tower_ros
 
 The scripted block tower from `pensig/tower_scripted.py` on the lab UR7e: black on green, then red on black.
-It uses lab 5's interfaces (MoveIt IK and planning, `/toggle_gripper`, the wrist RealSense) and adds a
+It uses the lab cell's interfaces (MoveIt IK and planning, `/toggle_gripper`, the wrist RealSense) and adds a
 close-up estimate from the wrist camera before each descent and a touchdown that stops on the wrist force.
 
 ## Build
 
-In the lab workspace, next to lab 5's `planning` package (its collision boxes are loaded if present):
+In the lab workspace (the collision boxes of its `planning` package are loaded if present):
 
 ```
-ln -s ~/ur-pen-signature/ros2/tower_ros ~/<workspace>/src/tower_ros
+ln -s ~/ur7e-block-tower/ros2/tower_ros ~/<workspace>/src/tower_ros
 cd ~/<workspace> && colcon build --packages-select tower_ros && source install/setup.bash
 ```
 
 ## Run
 
-Robot driver up as in lab 5, then:
+UR driver up, then:
 
 ```
 ros2 launch tower_ros tower_bringup.launch.py
@@ -40,13 +40,12 @@ skipped, so the tower goes on where it stopped. The gripper state is kept in `~/
 
 - Step mode first (the default): every motion and gripper toggle waits for Enter. Keep a hand on the e-stop and
   the pendant speed slider low.
-- Measure first: `gripper_length` (flange to fingertips: 0.16 measured on the lab Hand-E, lab 5's code ended
-  at 0.14; too short sends the fingers into the table), the block heights, and the black top against
-  `/tower/black/top` (lab 5 saw it 2 cm low; set `black_top_offset`). In the sim a 3 mm height error took the
-  tower from 94 % to 89 %, 10 mm to 83 %.
+- Measure first: `gripper_length` (flange to fingertips: 0.16 measured on the lab Hand-E; too short sends
+  the fingers into the table), the block heights, and the black top against `/tower/black/top` (the
+  RealSense reads dark tops low; set `black_top_offset`).
 - `/toggle_gripper` only toggles: the node opens the gripper at startup if its last run left it closed. If it
   is open while the file says closed, toggle it once by hand first.
-- Lab 5's gripper collision box reaches 18.5 cm below the flange: if IK fails near the table, check
+- The lab workspace's gripper collision box reaches 18.5 cm below the flange: if IK fails near the table, check
   `obstacles.yaml`.
 
 ## Policy
@@ -57,7 +56,8 @@ the trajectory controller. In sim it builds 83 % of towers against 91.5 % for th
 experiment; `tower` stays the reliable way.
 
 Once, on the dev machine, export the network to numpy (no torch or MuJoCo needed on the arm), then copy
-`policy.npz` and `config.json` to `runs/tower_v6/` in the lab checkout (`repo`, default `~/ur-pen-signature`):
+`policy.npz` and `config.json` to `runs/tower_v6/` in the checkout on the lab machine (`repo`; when empty,
+`~/ur7e-block-tower`, else `~/ur-pen-signature`, the repository's earlier name):
 
 ```
 python scripts/export_tower_policy.py runs/tower_v6

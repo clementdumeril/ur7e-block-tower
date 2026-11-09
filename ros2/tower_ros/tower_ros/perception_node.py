@@ -1,12 +1,12 @@
-"""Finds the green, black and red blocks in the wrist RealSense cloud, the way lab 5 found its cube.
+"""Finds the green, black and red blocks in the wrist RealSense cloud by color and height above the table.
 
 Per block and frame: top-face center and yaw on /tower/<color>/top (PoseStamped, base_link), the height
-(top minus the local table ring) on /tower/<color>/height, and all blocks together on /tower/blocks
-(MarkerArray, one CUBE per block from the table ring to the top) which the tower node reads.
+(top minus the table around the block) on /tower/<color>/height, and all blocks together on /tower/blocks
+(MarkerArray, one CUBE per block from the table to the top) which the tower node reads.
 
-Black is found by low V, as lab 5 did. Lab 5 saw the RealSense put the black cube's top about 2 cm too
-low (black absorbs the projector's IR); measure it and set black_top_offset. The tower node takes the
-block bottom from the table ring, so the grasp does not depend on it, but the place on black does.
+Black is found by low V. The RealSense puts the black block's top too low (black absorbs the
+projector's IR); measure it and set black_top_offset. The tower node takes the block bottom from the
+table around it, so the grasp does not depend on it, but the place on black does.
 """
 
 import math
@@ -36,17 +36,18 @@ class TowerPerception(Node):
         self.cloud_topic = dp("cloud_topic", "/camera/camera/depth/color/points").value
         self.max_rate = float(dp("max_rate", 5.0).value)  # Hz, the cloud comes at 30 Hz
         self.stride = int(dp("stride", 2).value)  # keep every stride-th point
-        # where to look in base_link (lab 5 max_y 0.79 kept the wall out)
+        # where to look in base_link (max_y 0.79 keeps the wall out)
         self.x_lim = (float(dp("min_x", -1.0).value), float(dp("max_x", 1.0).value))
         self.y_lim = (float(dp("min_y", -1.0).value), float(dp("max_y", 0.79).value))
         # table z: auto = most populated height between table_min_z and table_max_z, else table_z
         self.table_auto = bool(dp("table_auto", True).value)
         self.table_z = float(dp("table_z", -0.19).value)
         self.table_lim = (float(dp("table_min_z", -0.40).value), float(dp("table_max_z", 0.10).value))
-        self.ring = (float(dp("ring_min", 0.06).value), float(dp("ring_max", 0.15).value))  # lab 5 TABLE_RING_*
+        self.table_annulus = (float(dp("table_annulus_min", 0.06).value),
+                              float(dp("table_annulus_max", 0.15).value))
         self.min_points = int(dp("min_points", 30).value)
         self.top_band = float(dp("top_band", 0.008).value)
-        # added to the measured top of each block (m); lab 5 saw the black top read ~2 cm low
+        # added to the measured top of each block (m); the black top reads low
         self.top_offset = {c: float(dp(f"{c}_top_offset", 0.0).value) for c in BLOCKS}
         # drop points near the gripper axis below the wrist (black fingers look like the black block)
         self.wrist_frame = dp("wrist_frame", "wrist_3_link").value
@@ -80,7 +81,7 @@ class TowerPerception(Node):
             self.get_logger().warn("The cloud has no rgb field: launch the RealSense with pointcloud.enable",
                                    throttle_duration_sec=5.0)
             return
-        # The cloud's own stamp, so a moving arm does not shift the blocks; the latest TF (what lab 5 used)
+        # The cloud's own stamp, so a moving arm does not shift the blocks; the latest TF
         # if that one is not in the buffer yet. The tower node only reads frames taken at rest anyway.
         try:
             try:
@@ -126,7 +127,7 @@ class TowerPerception(Node):
 
         markers = MarkerArray()
         for k, color in enumerate(BLOCKS):
-            e = estimate_block(points, masks[color], any_block, table_z, ring=self.ring, top_band=self.top_band,
+            e = estimate_block(points, masks[color], any_block, table_z, table_annulus=self.table_annulus, top_band=self.top_band,
                                min_points=self.min_points, top_offset=self.top_offset[color])
             m = Marker(header=header, ns=color, id=k, type=Marker.CUBE)
             if e is None:

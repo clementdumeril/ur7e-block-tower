@@ -99,7 +99,7 @@ class PolicyFrame:
         return ToolPose(float(p[0]), float(p[1]), float(p[2]), wrap_pi(yaw - self.finger_axis_yaw - self.yaw))
 
     def block(self, e: BlockEstimate, below: float, height: float):
-        """World position (height/2 above the bottom) and yaw of a block standing `below` above the table ring
+        """World position (height/2 above the bottom) and yaw of a block standing `below` above the table
         measured around it; heights come from the ruler, not from the camera top (dark tops read low)."""
         return self.to_world([e.x, e.y, e.bottom + below + height / 2]), e.yaw + self.yaw
 
@@ -318,12 +318,27 @@ def load_policy(path):
     return act
 
 
+REPO_CANDIDATES = ("~/ur7e-block-tower", "~/ur-pen-signature")
+
+
+def resolve_repo(path: str = "") -> Path:
+    """The `repo` parameter if set, else the first existing checkout: ~/ur7e-block-tower, then
+    ~/ur-pen-signature (the repository's earlier name, still the checkout on the lab machine)."""
+    if path:
+        return Path(path).expanduser()
+    for candidate in REPO_CANDIDATES:
+        p = Path(candidate).expanduser()
+        if p.exists():
+            return p
+    return Path(REPO_CANDIDATES[0]).expanduser()
+
+
 def scripted_stack_class(repo=None):
     """pensig.tower_scripted.ScriptedStack, the script itself. pensig.tower needs MuJoCo, and ScriptedStack
     only takes TIP_BELOW_TCP and wrap_quarter from it, so without MuJoCo those two come from here."""
     if repo is not None and str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
-    import pensig  # noqa: F401  (pensig not found: set `repo` to the ur-pen-signature checkout)
+    import pensig  # noqa: F401  (pensig not found: set `repo` to the ur7e-block-tower checkout)
 
     try:
         import pensig.tower  # noqa: F401

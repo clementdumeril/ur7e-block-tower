@@ -5,7 +5,7 @@ the dry run and the unit tests. Per stage (black on green, then red on black):
 
   coarse          estimate from the start pose; a stage already stacked (a run stopped by the e-stop and
                   started again) is skipped
-  closeup_held    camera above the held block, second estimate (the sim's wrist close-up: 52 % -> 94 %)
+  closeup_held    camera above the held block, second estimate (the sim's wrist close-up: 52 % -> 93 %)
   above_held      fingertips pre_grasp above the block top
   grasp_descent   straight down to finger_above_bottom over the block bottom, at least table_clearance
   close           /toggle_gripper
@@ -30,16 +30,16 @@ class TowerAbort(RuntimeError):
 
 @dataclass
 class TowerParams:
-    # wrist_3_link (the flange) to fingertips: 0.16 measured on the lab Hand-E (lab 5 code went 0.14, 0.16,
-    # 0.14). Too short puts the fingers into the table, so check it on the arm.
+    # wrist_3_link (the flange) to fingertips: 0.16 measured on the lab Hand-E. Too short puts the
+    # fingers into the table, so check it on the arm.
     gripper_length: float = 0.16
     finger_above_bottom: float = 0.015  # sim cfg.finger_above_bottom
-    table_clearance: float = 0.02  # lab 5 TABLE_CLEARANCE
+    table_clearance: float = 0.02  # fingertips above the table, at least
     clearance: float = 0.05  # the held block's bottom above every other block when it moves across
     pre_grasp: float = 0.05  # fingertips above the block top before the straight descent
     second_estimate: bool = True
     closeup_height: float = 0.30  # camera above the block top for the second estimate
-    camera_offset: tuple = (-0.025, 0.13, 0.0)  # wrist_3_link -> camera_depth_optical_frame, lab 5 static TF
+    camera_offset: tuple = (-0.025, 0.13, 0.0)  # wrist_3_link -> camera_depth_optical_frame, as the static TF
     finger_axis_yaw: float = 0.0  # direction the fingers close along at tool yaw 0, in base_link
     move_speed: float = 0.03  # m/s for straight moves
     approach_speed: float = 0.02
@@ -125,7 +125,7 @@ class TowerScript:
         r.move(ToolPose(h.x, h.y, h.top + p.pre_grasp, yaw_g), f"fingertips above the {held} block",
                speed=p.move_speed if p.second_estimate else None)
 
-        # h.bottom is the table ring next to the block, so the grasp does not depend on the measured top,
+        # h.bottom is the table next to the block, so the grasp does not depend on the measured top,
         # which the RealSense gets wrong on the black block.
         grasp_z = max(h.bottom + p.finger_above_bottom, h.bottom + p.table_clearance)
         grasp_height = grasp_z - h.bottom
@@ -205,4 +205,4 @@ class TowerScript:
         want = self.p.block_heights.get(color)
         if want is not None and abs(e.height - want) > self.p.height_tolerance:
             self.log(f"  warning: the {color} block measures {e.height * 1000:.0f} mm tall, expected "
-                     f"{want * 1000:.0f} mm (a 10 mm height error took the sim from 94 % to 83 %)")
+                     f"{want * 1000:.0f} mm")

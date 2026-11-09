@@ -122,7 +122,7 @@ def test_frame_round_trip():
     np.testing.assert_allclose(tcp, [0.5, 0.0, 0.015 + TIP_BELOW_TCP])  # table at z = 0
 
 
-def test_block_heights_from_the_table_ring():
+def test_block_heights_from_the_table_annulus():
     fr = PolicyFrame(table_z=-0.206)
     e = BlockEstimate(0.45, -0.1, top=-0.08, yaw=0.1, height=0.122)  # bottom -0.202, camera top 4 mm low
     p, yaw = fr.block(e, stack_below("black", HEIGHTS), HEIGHTS["black"])

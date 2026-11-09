@@ -173,7 +173,7 @@ def test_without_second_estimate_the_coarse_error_stays():
 
 
 def test_target_top_read_low_contacts_during_approach():
-    # The camera reads the black top 2 cm low (lab 5): the place on black meets it before the slow zone.
+    # The camera reads the black top 2 cm low: the place on black meets it before the slow zone.
     p = TowerParams()
     arm = FakeArm(p, top_err={"black": -0.02})
     script = TowerScript(arm, p, log=lambda *_: None)

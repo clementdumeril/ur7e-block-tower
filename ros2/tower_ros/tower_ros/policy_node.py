@@ -13,7 +13,7 @@ a base_link box), MoveIt /compute_ik seeded with the last command, one point on
 Why this interface: the trajectory controller is the one MoveIt and tower_node already use (no controller
 switch), it follows the pendant speed slider, and if this node dies the arm stops at the last point;
 forward_velocity_controller would keep the last velocity and needs the Jacobian. /compute_ik takes a few ms
-against a 50 ms period and checks the lab 5 collision boxes.
+against a 50 ms period and checks the cell's collision boxes.
 
 The wrist camera sits 13 cm off the gripper axis and the RealSense sees nothing closer than ~0.28 m, so it
 cannot look at a block from where the sim's trigger fires (TCP within 1 cm of the block, < 25 cm above).
@@ -53,8 +53,8 @@ from visualization_msgs.msg import Marker, MarkerArray
 from tower_ros.geometry import (BLOCKS, STAGES, ToolPose, combine_samples, estimate_from_marker, quat_to_matrix,
                                 tool_for_camera_above, tool_from_wrist, wrist_from_tool)
 from tower_ros.policy import (RESIDUAL_SCALE, GripperModel, PolicyFrame, SimConfig, StageState, closing_on_block,
-                              load_policy, residual_obs, scripted_stack_class, sensor_force, sim_start, stack_below,
-                              stage_done, step_target, total_action)
+                              load_policy, residual_obs, resolve_repo, scripted_stack_class, sensor_force, sim_start,
+                              stack_below, stage_done, step_target, total_action)
 
 UR_JOINTS = ("shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
              "wrist_1_joint", "wrist_2_joint", "wrist_3_joint")
@@ -90,7 +90,7 @@ class TowerPolicy(Node):
     def __init__(self):
         super().__init__("tower_policy")
         dp = self.declare_parameter
-        self.repo = Path(dp("repo", "~/ur-pen-signature").value).expanduser()
+        self.repo = resolve_repo(dp("repo", "").value)
         policy = Path(dp("policy", "runs/tower_v6/policy.npz").value).expanduser()
         self.policy_path = policy if policy.is_absolute() else self.repo / policy
         self.dry_run = bool(dp("dry_run", False).value)  # IK and log, nothing moves

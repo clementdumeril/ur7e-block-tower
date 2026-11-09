@@ -6,15 +6,15 @@ tower_perception:
     cloud_topic: /camera/camera/depth/color/points
     max_rate: 5.0
     stride: 2
-    max_y: 0.79              # lab 5: keeps the wall out
+    max_y: 0.79              # keeps the wall out
     table_auto: true         # table z = most populated height in [table_min_z, table_max_z]
     table_min_z: -0.40
     table_max_z: 0.10
-    ring_min: 0.06           # lab 5 TABLE_RING_MIN / MAX
-    ring_max: 0.15
+    table_annulus_min: 0.06  # local table height: points this far from the block center ...
+    table_annulus_max: 0.15  # ... up to this
     band_min: 0.008          # block points: this far above the table ...
     band_max: 0.20           # ... up to this
-    # HSV in OpenCV units (H 0..179), tune with lab 5's hsv_tuner
+    # HSV in OpenCV units (H 0..179)
     green_h_min: 40
     green_h_max: 85
     green_s_min: 80
@@ -23,7 +23,7 @@ tower_perception:
     red_h_min: 170
     red_s_min: 120
     red_v_min: 50
-    black_v_max: 80          # lab 5 cube_max_v
+    black_v_max: 80          # black = low V
     # The RealSense reads dark tops low: measured on the lab blocks, green 42 for 50 mm, black 65 for 80,
     # red 31 for 30. Ruler height minus /tower/<color>/height (positive raises the top).
     black_top_offset: 0.015
@@ -39,7 +39,7 @@ tower:
     stages: 2                # 1: black on green only
     velocity_scaling: 0.1    # MoveIt-planned moves
     acceleration_scaling: 0.1
-    gripper_length: 0.16     # flange to fingertips as measured on the lab Hand-E (lab 5 code: 0.14)
+    gripper_length: 0.16     # flange to fingertips as measured on the lab Hand-E
     finger_above_bottom: 0.015
     table_clearance: 0.02
     clearance: 0.05
@@ -63,7 +63,7 @@ tower:
 
 tower_policy:
   ros__parameters:
-    repo: ~/ur-pen-signature   # pensig (ScriptedStack) and the run folder
+    repo: ""                 # pensig checkout; empty: ~/ur7e-block-tower, else ~/ur-pen-signature
     policy: runs/tower_v6/policy.npz  # from scripts/export_tower_policy.py; final_model.zip needs torch + SB3
     step: true               # Enter before each planned move and before each stage's loop
     dry_run: false           # IK and log only, the fingertips "follow" the command exactly

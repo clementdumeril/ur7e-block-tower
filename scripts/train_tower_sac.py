@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--demos", type=int, default=2000, help="script episodes for the demonstration buffer")
     ap.add_argument("--demo-ratio", type=float, default=0.5, help="share of every batch from the demonstrations")
     ap.add_argument("--bc", type=float, default=0.4, help="weight of the cloning term (TD3+BC: 0.4), 0: plain SAC")
+    ap.add_argument("--bc-grip", type=float, default=0.0, help="gripper weight in the cloning term after pre-training")
+    ap.add_argument("--det", type=float, default=0.0, help="weight of -Q at the mean action in the actor loss")
     ap.add_argument("--q-filter", action="store_true", help="clone only where the critic prefers the script")
     ap.add_argument("--bc-pretrain", type=int, default=50_000, help="actor-only cloning steps before training")
     ap.add_argument("--utd", type=float, default=0.25, help="gradient steps per environment step")
@@ -126,6 +128,7 @@ def main():
         model.learning_starts = model.num_timesteps + 20_000  # refill the online buffer first
         model.tensorboard_log = str(args.out)
         model.bc_weight, model.q_filter, model.bc_stats = args.bc, args.q_filter, {"bc": [], "kept": []}
+        model.bc_grip, model.det_weight = args.bc_grip, args.det
         print(f"resuming from {args.resume} at level {args.level}", flush=True)
     else:
         venv = VecNormalize(venv, norm_obs=True, norm_reward=False, clip_obs=10.0, gamma=args.gamma)
@@ -136,7 +139,8 @@ def main():
                         replay_buffer_class=DemoMixBuffer,
                         replay_buffer_kwargs=dict(demo_ratio=args.demo_ratio, handle_timeout_termination=False),
                         policy_kwargs=dict(net_arch=args.net), seed=args.seed, device="cpu", verbose=0,
-                        tensorboard_log=str(args.out), bc_weight=args.bc, q_filter=args.q_filter)
+                        tensorboard_log=str(args.out), bc_weight=args.bc, q_filter=args.q_filter,
+                        bc_grip=args.bc_grip, det_weight=args.det)
     model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"], demo["clean"])
     if args.bc_pretrain and not args.resume:
         t0 = time.time()

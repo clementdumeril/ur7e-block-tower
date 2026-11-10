@@ -14,6 +14,16 @@ actions come from the policy. DemoSAC adds a behaviour cloning term on the demon
 (DDPGfD, Vecerik et al. 2017; Nair et al. 2018; TD3+BC, Fujimoto and Gu 2021, for the Q scaling).
 The Q filter of Nair et al. is an option, off by default: it keeps the term only where the critic prefers the
 script's action, and here the critic is what prefers moving away.
+
+The gripper (tower_sac_41085727, 1M steps): from the descent onto the tower, sampled actions placed 30/30 and the
+mean action 2/30. The mean reached the place height and stayed there closed, though the critic valued opening
+higher at every step (8.8 vs 8.2). Two things held it: cloning pulled it towards closed (at that height the
+script still descends, closed, until it feels contact), and the gripper's std sat at its maximum (7.4 before tanh),
+so the SAC loss, an average over samples that open about half the time, barely depends on the mean. So after the
+pre-training the cloning term leaves the gripper out (`bc_grip`), and the gripper's std is capped at 1 before tanh
+(GripActor): its sampled command then follows the mean, and the SAC loss moves the mean where the critic prefers.
+Maximising Q at the mean action as well (`det_weight`, the DDPG/TD3 gradient) is an option, off by default: in a
+60k-step fine-tune from that checkpoint it broke every phase (0/20 even from the plain reset).
 """
 
 import numpy as np
@@ -23,7 +33,9 @@ from torch import nn
 from stable_baselines3 import SAC
 from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.utils import polyak_update
-from stable_baselines3.sac.policies import SACPolicy
+from stable_baselines3.sac.policies import Actor, SACPolicy
+
+GRIP_LOG_STD_MAX = 0.0  # std 1 before tanh for the gripper; SB3's cap (2, std 7.4) for the motion
 
 
 def _mlp_ln(n_in: int, arch: list[int]) -> nn.Sequential:
@@ -34,8 +46,22 @@ def _mlp_ln(n_in: int, arch: list[int]) -> nn.Sequential:
     return nn.Sequential(*layers, nn.Linear(d, 1))
 
 
+class GripActor(Actor):
+    """SB3's SAC actor, with the gripper's (last action) log std capped at GRIP_LOG_STD_MAX."""
+
+    def get_action_dist_params(self, obs):
+        mean, log_std, kw = super().get_action_dist_params(obs)
+        cap = torch.full_like(log_std[:1], float("inf"))
+        cap[:, -1] = GRIP_LOG_STD_MAX
+        return mean, torch.minimum(log_std, cap), kw
+
+
 class LNSACPolicy(SACPolicy):
-    """SACPolicy whose Q networks have LayerNorm after every hidden layer."""
+    """SACPolicy whose Q networks have LayerNorm after every hidden layer, and whose actor is a GripActor."""
+
+    def make_actor(self, features_extractor=None):
+        actor_kwargs = self._update_features_extractor(self.actor_kwargs, features_extractor)
+        return GripActor(**actor_kwargs).to(self.device)
 
     def make_critic(self, features_extractor=None):
         critic = super().make_critic(features_extractor)
@@ -91,20 +117,25 @@ class DemoSAC(SAC):
     each batch (DemoMixBuffer puts them last). The SAC part is divided by the batch's mean |Q|, as in TD3+BC, so
     that `bc_weight` means the same whatever the scale of the returns."""
 
-    def __init__(self, *args, bc_weight: float = 1.0, q_filter: bool = False, **kwargs):
+    def __init__(self, *args, bc_weight: float = 1.0, q_filter: bool = False, bc_grip: float = 0.0,
+                 det_weight: float = 0.0, **kwargs):
         super().__init__(*args, **kwargs)
         self.bc_weight = bc_weight
         self.q_filter = q_filter
+        self.bc_grip = bc_grip  # weight of the gripper in the cloning term during training (pre-training: 1)
+        self.det_weight = det_weight  # weight of -Q(s, mean action) in the actor loss
         self.bc_stats = {"bc": [], "kept": []}
 
-    def bc_term(self, obs, actions):
+    def bc_term(self, obs, actions, grip: float = 1.0):
         """Mean squared distance from the actor's mean action to the demonstrated one, and the share of rows
         kept by the Q filter. The gripper target is +-0.9: binary_grip treats anything beyond 0.5 the same, and
         +-1 would push tanh into saturation."""
         target = actions.clone()
         target[:, 4] = target[:, 4].clamp(-0.9, 0.9)
         mu = self.actor(obs, deterministic=True)
-        err = ((mu - target) ** 2).sum(dim=1, keepdim=True)
+        w = torch.ones(mu.shape[1], device=mu.device)
+        w[4] = grip
+        err = ((mu - target) ** 2 * w).sum(dim=1, keepdim=True)
         if self.q_filter:
             with torch.no_grad():
                 q_demo = torch.min(torch.cat(self.critic(obs, actions), dim=1), dim=1, keepdim=True)[0]
@@ -169,8 +200,12 @@ class DemoSAC(SAC):
 
             q_pi = torch.min(torch.cat(self.critic(data.observations, actions_pi), dim=1), dim=1, keepdim=True)[0]
             actor_loss = (ent_coef * log_prob - q_pi).mean()
+            if self.det_weight > 0:
+                mu = self.actor(data.observations, deterministic=True)
+                q_mu = torch.min(torch.cat(self.critic(data.observations, mu), dim=1), dim=1, keepdim=True)[0]
+                actor_loss = actor_loss - self.det_weight * q_mu.mean()
             if self.bc_weight > 0 and n_demo > 0:
-                bc, kept = self.bc_term(data.observations[-n_demo:], self.replay_buffer.last_clean)
+                bc, kept = self.bc_term(data.observations[-n_demo:], self.replay_buffer.last_clean, self.bc_grip)
                 actor_loss = actor_loss / q_pi.abs().mean().detach().clamp(min=1.0) + self.bc_weight * bc
                 self.bc_stats["bc"].append(bc.item())
                 self.bc_stats["kept"].append(kept)

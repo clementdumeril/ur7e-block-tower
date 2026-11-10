@@ -158,7 +158,10 @@ def main():
             self.det = {}
             cfg = TowerConfig()
             cfg.shaping_gamma, cfg.timeout_penalty = args.gamma, args.timeout_penalty
-            self.gate_env = ScriptStart(TowerEnv(cfg), seed=args.seed + 99_000)
+            # Every gate episode from its own script replay: one saved state per phase, used once. With the
+            # training settings 20 episodes came from one or two replays, the same blocks, and the gate jumped
+            # by 50 points between checks (tower_sac_41067442).
+            self.gate_env = ScriptStart(TowerEnv(cfg), seed=args.seed + 99_000, save_prob=0.0, uses=1)
 
         def active(self):
             return range(frontier(min(self.level, MAX_LEVEL - 1)), N_PHASES)

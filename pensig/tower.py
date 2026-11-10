@@ -458,7 +458,7 @@ class TowerEnv(gym.Env):
             [self.wrist_held, self.wrist_target],
             self.force / 10,
             self.prev_action,
-            [self.t / self.cfg.episode_steps],
+            [self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0],
             [self.stage],
         ])
         return obs.astype(np.float32)

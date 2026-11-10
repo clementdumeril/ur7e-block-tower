@@ -32,6 +32,14 @@ def test_step_api(env):
         assert {"is_success", "dropped", "stopped", "stage"} <= info.keys()
 
 
+def test_no_clock_in_the_observation():
+    e = TowerEnv(TowerConfig())
+    e.reset(seed=2)
+    for _ in range(10):
+        obs, *_ = e.step(np.zeros(5))
+    assert obs[27] == 0.0
+
+
 def test_residual_obs_shape():
     env = ResidualTowerEnv(TowerConfig())
     obs, _ = env.reset(seed=0)

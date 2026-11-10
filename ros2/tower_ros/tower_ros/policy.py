@@ -42,6 +42,7 @@ class SimConfig:
     start_above: tuple = (0.08, 0.16)
     xy_lo: tuple = (0.38, -0.18)
     xy_hi: tuple = (0.60, 0.18)
+    time_in_obs: bool = True  # runs from before the field (tower_v6) had the clock in obs[27]
 
     @classmethod
     def from_run(cls, run_dir) -> "SimConfig":
@@ -191,7 +192,7 @@ class StageState:
             [self.wrist_held, self.wrist_target],
             self.force / 10,
             self.prev_action,
-            [self.t / self.cfg.episode_steps],
+            [self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0],
             [self.stage],
         ]).astype(np.float32)
 

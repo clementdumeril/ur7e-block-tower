@@ -102,6 +102,13 @@ class TowerConfig:
     wrist_pos_noise: float = 0.001
     wrist_yaw_noise: float = float(np.deg2rad(1.5))
 
+    # The elapsed fraction of the episode in the observation (obs[27]); 0 when off. Off: the curriculum restarts
+    # the clock at every handover, and tower_sac_41037952 used it to tell where it was in the task. With the
+    # clock at 0 it closed the gripper as soon as it was handed over above the block, too high, and from the
+    # plain reset it waited at the grasp for ~90 steps (deterministic: 20/30 from the reset, 0/30 with the
+    # clock held at 0). On the real arm the pace differs from the sim anyway.
+    time_in_obs: bool = False
+
     grip_force: tuple = (10.0, 20.0)
     pad_friction: tuple = (0.6, 1.2)
     latency_prob: float = 0.3

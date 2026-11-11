@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from train_tower_curriculum import evaluate, evaluate_phases, make_env  # noqa: E402
 from pensig.config import TowerConfig  # noqa: E402
-from pensig.curriculum import MAX_LEVEL, N_PHASES, ScriptStart, frontier  # noqa: E402
+from pensig.curriculum import MAX_LEVEL, N_PHASES, ScriptStart, binary_grip, frontier  # noqa: E402
 from pensig.tower import TowerEnv  # noqa: E402
 
 
@@ -190,7 +190,29 @@ def main():
                     ok += bool(info["is_success"])
                 out[p] = round(ok / args.gate_episodes, 2)
             w.fixed_phase = None
+            if -1 in phases:
+                out["tower"] = self.towers()
             return out
+
+        def towers(self) -> float:
+            """Full towers from the plain reset, stage 1 after the policy's own stage 0, as at run time."""
+            e, built = self.gate_env.unwrapped, 0
+            for _ in range(args.gate_episodes):
+                self.gate_env._new_sizes()
+                obs, _ = e.reset(options={"stage": 0})
+                for stage in (0, 1):
+                    if stage == 1:
+                        obs, _ = e.next_stage()
+                    done = False
+                    while not done:
+                        a = model.predict(venv.normalize_obs(obs), deterministic=True)[0]
+                        obs, _, term, trunc, info = e.step(binary_grip(e, a))
+                        done = term or trunc
+                    if not info["is_success"]:
+                        break
+                else:
+                    built += 1
+            return round(built / args.gate_episodes, 2)
 
         def _on_step(self) -> bool:
             for done, info in zip(self.locals["dones"], self.locals["infos"]):
@@ -200,10 +222,12 @@ def main():
                     self.phase[p].append(ok)
                     self.why[p].append("ok" if ok else info.get("failure") or (
                         "stop" if info.get("stopped") else "unstable" if info.get("unstable") else "timeout"))
-            if self.num_timesteps >= self.next_gate and self.level < MAX_LEVEL:
+            # At the last level the gate goes on, for the log only: tower_sac_41150365 reached it after 136 min
+            # and printed the same numbers for the next 4 hours.
+            if self.num_timesteps >= self.next_gate:
                 self.next_gate = self.num_timesteps + args.gate_every
                 self.det = self.gate()
-                if min(self.det.values()) >= args.threshold:
+                if self.level < MAX_LEVEL and min(v for k, v in self.det.items() if k != "tower") >= args.threshold:
                     self.level += 1
                     self.phase[frontier(min(self.level, MAX_LEVEL - 1))].clear()
                     venv.env_method("set_level", self.level)

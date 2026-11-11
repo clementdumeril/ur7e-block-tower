@@ -179,10 +179,13 @@ class TowerEnv(gym.Env):
             d.qpos[qa:qa + 3] = pos
             d.qpos[qa + 3:qa + 7] = quat_z(yaw)
 
-        held = STAGES[stage][0]
+        held, target = STAGES[stage]
         tallest = max(pos[2] + self.sizes[b][1] / 2 for b, (pos, _) in poses.items())
-        start = np.array([*(poses[held][0][:2] + rng.uniform(-cfg.start_xy_spread, cfg.start_xy_spread, 2)),
-                          tallest + TIP_BELOW_TCP + u(cfg.start_above)])
+        if rng.random() < cfg.start_over_target:
+            start = np.array([*poses[target][0][:2], tallest + TIP_BELOW_TCP + u(cfg.start_over_target_above)])
+        else:
+            start = np.array([*(poses[held][0][:2] + rng.uniform(-cfg.start_xy_spread, cfg.start_xy_spread, 2)),
+                              tallest + TIP_BELOW_TCP + u(cfg.start_above)])
         start = np.clip(start, cfg.target_lo, cfg.target_hi)
         yaw = rng.uniform(-np.pi, np.pi)
         q = self.ik.solve(Q_SEED, start, down_rotation(yaw), iters=200, tol=1e-7)

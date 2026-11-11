@@ -86,6 +86,12 @@ class TowerConfig:
 
     start_above: tuple = (0.08, 0.16)
     start_xy_spread: float = 0.10
+    # Share of resets that start over the target instead of over the held block, start_over_target_above over the
+    # tallest block: where the arm is after its own placement, when stage 1 follows stage 0. tower_sac_41150365
+    # started only over the held block, built the first block 52-85 % of the time from the reset and the second
+    # 0-14 % after its own first: from over the tower it closed on nothing or hovered there until the time ran out.
+    start_over_target: float = 0.5
+    start_over_target_above: tuple = (0.02, 0.16)
 
     # Grasp height: the fingertips stay this far above the bottom of the block, and so above the table.
     finger_above_bottom: float = 0.015

@@ -40,6 +40,26 @@ def test_no_clock_in_the_observation():
     assert obs[27] == 0.0
 
 
+def test_carry_flag_in_the_observation():
+    """obs[27]: 0 until the script closes on the block, then 1, still 1 once the gripper opens over the tower.
+    Closing high above the block does not set it."""
+    from pensig.tower_scripted import ScriptedStack
+    e = TowerEnv(TowerConfig().noiseless())
+    e.reset(seed=3, options={"stage": 0})
+    script, seen = ScriptedStack(), []
+    for _ in range(e.cfg.episode_steps):
+        obs, _, term, trunc, _ = e.step(script(e))
+        seen.append((script.phase, obs[27]))
+        if term or trunc:
+            break
+    assert all(f == 0.0 for ph, f in seen if ph < 2)
+    assert all(f == 1.0 for ph, f in seen if ph >= 3)
+    e.reset(seed=3, options={"stage": 0})
+    for _ in range(5):
+        obs, *_ = e.step(np.array([0, 0, 0, 0, -1.0]))
+    assert obs[27] == 0.0
+
+
 def test_residual_obs_shape():
     env = ResidualTowerEnv(TowerConfig())
     obs, _ = env.reset(seed=0)

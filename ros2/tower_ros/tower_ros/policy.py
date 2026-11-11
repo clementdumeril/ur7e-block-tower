@@ -43,6 +43,7 @@ class SimConfig:
     xy_lo: tuple = (0.38, -0.18)
     xy_hi: tuple = (0.60, 0.18)
     time_in_obs: bool = True  # runs from before the field (tower_v6) had the clock in obs[27]
+    carry_in_obs: bool = False  # TowerConfig.carry_in_obs, the carry latch in obs[27]; False for older runs
 
     @classmethod
     def from_run(cls, run_dir) -> "SimConfig":
@@ -137,6 +138,7 @@ class StageState:
         self.held_close, self.target_close = held_close, target_close
         self.grasp_z_off = TIP_BELOW_TCP + cfg.finger_above_bottom
         self.wrist_held = self.wrist_target = False
+        self.carried = False
         self.lifted = False
         self.target_pos = np.asarray(tcp, float).copy()
         self.target_yaw = float(yaw)
@@ -177,8 +179,14 @@ class StageState:
         self.update_targets()
 
     def obs(self, tcp, yaw: float, opening: float) -> np.ndarray:
-        """TowerEnv._obs, 29 values."""
+        """TowerEnv._obs, 29 values. prev_action[4] must be the gripper command as applied (+-1 after the
+        binary gripper), as TowerEnv saw it in training: closed below 0."""
         tcp = np.asarray(tcp, float)
+        self.carried = carry_latch(self.carried, self.prev_action[4] < 0, tcp, self.est_grasp)
+        if self.cfg.carry_in_obs:
+            slot27 = float(self.carried)
+        else:
+            slot27 = self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0
         return np.concatenate([
             tcp - OBS_CENTER,
             [math.cos(yaw), math.sin(yaw)],
@@ -192,7 +200,7 @@ class StageState:
             [self.wrist_held, self.wrist_target],
             self.force / 10,
             self.prev_action,
-            [self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0],
+            [slot27],
             [self.stage],
         ]).astype(np.float32)
 
@@ -267,6 +275,13 @@ class GripperModel:
 def closing_on_block(tcp, est_grasp, tol: float = 0.015) -> bool:
     """The fingers close around the held block when the TCP is at the grasp estimate."""
     return bool(np.all(np.abs(np.asarray(tcp, float) - est_grasp) < tol))
+
+
+def carry_latch(carried: bool, closed: bool, tcp, est_grasp, tol: float = 0.015) -> bool:
+    """pensig.tower.carry_latch: set when closed at the grasp estimate, cleared when opened there."""
+    if closing_on_block(tcp, est_grasp, tol):
+        return bool(closed)
+    return carried
 
 
 # ---------------------------------------------------------------- the trained network

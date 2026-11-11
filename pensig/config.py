@@ -108,6 +108,11 @@ class TowerConfig:
     # plain reset it waited at the grasp for ~90 steps (deterministic: 20/30 from the reset, 0/30 with the
     # clock held at 0). On the real arm the pace differs from the sim anyway.
     time_in_obs: bool = False
+    # obs[27] says whether the gripper has closed on the held block this stage (carry_latch), in place of the
+    # clock. Without it, the gripper open above the tower looked the same after a placement as with the block
+    # never picked: tower_sac_41097733 closed on nothing above the block, flew to the tower, opened there and
+    # hovered (phase-1 starts 0 % for 4 h); its critic valued that above going down to the block (2.8 vs 2.4).
+    carry_in_obs: bool = True
 
     grip_force: tuple = (10.0, 20.0)
     pad_friction: tuple = (0.6, 1.2)

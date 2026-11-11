@@ -50,6 +50,15 @@ def wrap_quarter(angle: float) -> float:
     return (angle + np.pi / 4) % (np.pi / 2) - np.pi / 4
 
 
+def carry_latch(carried: bool, closed: bool, tcp, est_grasp, tol: float = 0.015) -> bool:
+    """Whether the block was taken this stage, from what the real arm knows too: set when the gripper is closed
+    with the TCP within tol of the grasp estimate on every axis (tower_ros.policy.closing_on_block), cleared when
+    it opens there again (a grasp given up). Opening anywhere else, as over the tower, keeps it."""
+    if np.all(np.abs(np.asarray(tcp, float) - est_grasp) < tol):
+        return bool(closed)
+    return carried
+
+
 class TowerEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 20}
 
@@ -219,6 +228,7 @@ class TowerEnv(gym.Env):
         # The TCP holds the block this far above its bottom, so it ends this far above the target's top.
         self.grasp_z_off = TIP_BELOW_TCP + cfg.finger_above_bottom
         self.wrist_held = self.wrist_target = False
+        self.carried = False
         self._update_targets()
 
         self.start_pos = {b: self.data.xpos[self.bid[b]].copy() for b in BLOCKS if b != self.held}
@@ -290,6 +300,7 @@ class TowerEnv(gym.Env):
         reward, success, failure = self._reward(a)
         self._wrist_look()
         self.prev_action = a
+        self.carried = carry_latch(self.carried, a[4] < 0, self.data.site_xpos[self.tcp_sid], self.est_grasp)
         if stopped:
             reward -= FAILURE_PENALTY
             success = False
@@ -458,10 +469,15 @@ class TowerEnv(gym.Env):
             [self.wrist_held, self.wrist_target],
             self.force / 10,
             self.prev_action,
-            [self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0],
+            [self._slot27()],
             [self.stage],
         ])
         return obs.astype(np.float32)
+
+    def _slot27(self) -> float:
+        if self.cfg.carry_in_obs:
+            return float(self.carried)
+        return self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0
 
     def _info(self, success: bool, failure: str = "") -> dict:
         return {"is_success": success, "failure": failure, "dropped": failure == "dropped", "stopped": False,

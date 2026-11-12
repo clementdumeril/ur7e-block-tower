@@ -160,6 +160,7 @@ def main():
             self.next_print = 0
             self.next_gate = args.gate_every
             self.det = {}
+            self.tower_hist, self.best = [], -1.0
             cfg = TowerConfig()
             cfg.shaping_gamma, cfg.timeout_penalty = args.gamma, args.timeout_penalty
             # Every gate episode from its own script replay: one saved state per phase, used once. With the
@@ -227,6 +228,8 @@ def main():
             if self.num_timesteps >= self.next_gate:
                 self.next_gate = self.num_timesteps + args.gate_every
                 self.det = self.gate()
+                if "tower" in self.det:
+                    self.keep_best(self.det["tower"])
                 if self.level < MAX_LEVEL and min(v for k, v in self.det.items() if k != "tower") >= args.threshold:
                     self.level += 1
                     self.phase[frontier(min(self.level, MAX_LEVEL - 1))].clear()
@@ -238,6 +241,19 @@ def main():
                 self.next_print += 200_000
                 self._print()
             return not args.max_minutes or time.time() - self.t0 < 60 * args.max_minutes
+
+        def keep_best(self, towers: float):
+            """The model with the most full towers over the last three gates, in best/. tower_sac_41216771 built
+            45-60 % of its towers at 3-4M steps and 5-10 % at 7M: the final model is not the one to keep."""
+            self.tower_hist.append(towers)
+            score = float(np.mean(self.tower_hist[-3:]))
+            if len(self.tower_hist) >= 3 and score > self.best:
+                self.best = score
+                (args.out / "best").mkdir(exist_ok=True)
+                model.save(args.out / "best" / "best_model")
+                venv.save(str(args.out / "best" / "vecnormalize.pkl"))
+                (args.out / "best" / "info.json").write_text(json.dumps(
+                    {"steps": self.num_timesteps, "towers_last_3_gates": self.tower_hist[-3:]}))
 
         def weights(self):
             """Start phases -1..7: weight 0.2 + failure rate, unknown phases as if always failed."""
@@ -276,6 +292,9 @@ def main():
 
     result = {"curriculum": cur.log[-1],
               "eval": evaluate(args.out / "final_model.zip", args.eval_towers, loader=load_sac)}
+    if (args.out / "best" / "best_model.zip").exists():
+        result["best"] = json.loads((args.out / "best" / "info.json").read_text())
+        result["eval_best"] = evaluate(args.out / "best" / "best_model.zip", args.eval_towers, loader=load_sac)
     (args.out / "summary.json").write_text(json.dumps(result, indent=2))
 
 

@@ -27,5 +27,7 @@ RUNS=/global/scratch/users/$USER
 RESUME=()
 [ -n "$1" ] && RESUME=(--resume "$RUNS/$1")
 [ -n "$2" ] && RESUME+=(--level "$2")
+# Buffer of 12M: the whole run (about 9M steps) without overwriting. tower_sac_41216771 had 3M, full at 3M steps;
+# its critic loss doubled after that and its towers fell from 45-60 % to 5-10 %.
 "$VENV/bin/python" -u scripts/train_tower_sac.py --out "$RUNS/tower_sac_$SLURM_JOB_ID" "${RESUME[@]}" \
-    --timesteps 30000000 --max-minutes 780 --n-envs 32 --threads 8 --eval-towers 100
+    --timesteps 30000000 --max-minutes 780 --n-envs 32 --threads 8 --eval-towers 100 --buffer 12000000

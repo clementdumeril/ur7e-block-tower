@@ -50,6 +50,13 @@ def wrap_quarter(angle: float) -> float:
     return (angle + np.pi / 4) % (np.pi / 2) - np.pi / 4
 
 
+def finger_above_bottom(cfg, height: float) -> float:
+    """Fingertips over the held block's bottom: cfg.finger_above_bottom, or higher so the palm clears the top."""
+    if cfg.palm_above_top is None:
+        return cfg.finger_above_bottom
+    return max(cfg.finger_above_bottom, height - FINGER_LEN + cfg.palm_above_top)
+
+
 def carry_latch(carried: bool, closed: bool, tcp, est_grasp, tol: float = 0.015) -> bool:
     """Whether the block was taken this stage, from what the real arm knows too: set when the gripper is closed
     with the TCP within tol of the grasp estimate on every axis (tower_ros.policy.closing_on_block), cleared when
@@ -228,8 +235,6 @@ class TowerEnv(gym.Env):
         self.est_top = tp + [0, 0, self.sizes[self.target][1] / 2] + self._noise(cfg.pos_noise, 3)
         self.est_target_yaw = tyaw + self._noise(cfg.yaw_noise)
         self.est_target_width = self.sizes[self.target][0] + self._noise(cfg.size_noise)
-        # The TCP holds the block this far above its bottom, so it ends this far above the target's top.
-        self.grasp_z_off = TIP_BELOW_TCP + cfg.finger_above_bottom
         self.wrist_held = self.wrist_target = False
         self.carried = False
         self._update_targets()
@@ -253,6 +258,8 @@ class TowerEnv(gym.Env):
         return self.np_random.normal(0, sigma, n)
 
     def _update_targets(self):
+        # The TCP holds the block this far above its bottom, so it ends this far above the target's top.
+        self.grasp_z_off = TIP_BELOW_TCP + finger_above_bottom(self.cfg, self.est_size[1])
         self.est_grasp = self.est_held + [0, 0, self.grasp_z_off - self.est_size[1] / 2]
         self.est_place = self.est_top + [0, 0, self.grasp_z_off]
 

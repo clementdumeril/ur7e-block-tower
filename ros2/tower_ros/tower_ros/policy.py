@@ -20,6 +20,7 @@ from tower_ros.geometry import BLOCKS, BlockEstimate, ToolPose, wrap_pi, wrap_qu
 
 # pensig/tower.py and pensig/scene.py, copied so this module imports without MuJoCo (the tests compare them).
 TIP_BELOW_TCP = 0.012  # HANDE_BODY + FINGER_LEN - TCP_Z: the sim TCP is this far above the fingertips
+FINGER_LEN = 0.06  # pensig/scene.py, palm to fingertips
 MAX_OPEN = 0.025  # Hand-E stroke per finger
 OBS_CENTER = np.array([0.5, 0.0, 0.1])
 N_PHASES = 8  # ScriptedStack phases, one-hot in the residual observation
@@ -36,6 +37,7 @@ class SimConfig:
     target_lo: tuple = (0.25, -0.35, 0.02)
     target_hi: tuple = (0.75, 0.35, 0.45)
     finger_above_bottom: float = 0.015
+    palm_above_top: float | None = None  # TowerConfig.palm_above_top; None (bottom rule only) for older runs
     wrist_camera: bool = True
     wrist_radius: float = 0.01
     wrist_max_height: float = 0.25
@@ -136,7 +138,6 @@ class StageState:
         self.est_size = np.asarray(held_size, float)
         self.est_target_width = float(target_width)
         self.held_close, self.target_close = held_close, target_close
-        self.grasp_z_off = TIP_BELOW_TCP + cfg.finger_above_bottom
         self.wrist_held = self.wrist_target = False
         self.carried = False
         self.lifted = False
@@ -152,6 +153,10 @@ class StageState:
         return self
 
     def update_targets(self):
+        above = self.cfg.finger_above_bottom
+        if self.cfg.palm_above_top is not None:
+            above = max(above, self.est_size[1] - FINGER_LEN + self.cfg.palm_above_top)
+        self.grasp_z_off = TIP_BELOW_TCP + above
         self.est_grasp = self.est_held + [0, 0, self.grasp_z_off - self.est_size[1] / 2]
         self.est_place = self.est_top + [0, 0, self.grasp_z_off]
 

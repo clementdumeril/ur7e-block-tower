@@ -180,3 +180,26 @@ def test_demo_sac_clones_the_script_and_trains_with_the_bc_term():
     stats = model.pop_bc_stats()
     assert stats["bc"] is not None and 0.0 <= stats["kept"] <= 1.0
     assert model.replay_buffer.last_n_demo == 16
+
+
+def test_grasp_clears_the_palm_on_a_tall_block():
+    """The measured black block (80 mm) is taller than the fingers (60 mm): the grasp rises so the palm stays
+    palm_above_top over it, and the script builds the tower without a protective stop."""
+    from pensig.scene import FINGER_LEN
+    from pensig.tower import TIP_BELOW_TCP, finger_above_bottom
+
+    cfg = TowerConfig()
+    assert finger_above_bottom(cfg, 0.04) == cfg.finger_above_bottom
+    assert finger_above_bottom(cfg, 0.08) == pytest.approx(0.08 - FINGER_LEN + cfg.palm_above_top)
+    cfg.mid_size = (0.04, 0.08)
+    env = TowerEnv(cfg)
+    script = ScriptedStack()
+    for seed in range(3):
+        env.reset(seed=seed, options={"stage": 0})
+        script.reset()
+        assert env.grasp_z_off == pytest.approx(TIP_BELOW_TCP + finger_above_bottom(cfg, env.est_size[1]))
+        done = False
+        while not done:
+            _, _, term, trunc, info = env.step(script(env))
+            done = term or trunc
+        assert info["is_success"], info

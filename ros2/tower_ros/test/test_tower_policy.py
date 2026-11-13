@@ -290,3 +290,13 @@ def test_obs_and_trigger_match_tower_env():
         if sim_script.phase == 7:
             break
     assert sim_script.phase == 7
+
+
+def test_grasp_rises_on_a_tall_block_for_new_runs():
+    """TowerConfig.palm_above_top: on the 80 mm black block the grasp is 32 mm over its bottom, not 15 mm; runs
+    trained before the field keep the bottom rule."""
+    old = stage0_state()
+    np.testing.assert_allclose(old.est_grasp, old.est_held + [0, 0, TIP_BELOW_TCP + 0.015 - 0.04])
+    new = stage0_state(SimConfig(palm_above_top=0.012))
+    np.testing.assert_allclose(new.est_grasp, new.est_held + [0, 0, TIP_BELOW_TCP + 0.032 - 0.04])
+    np.testing.assert_allclose(new.est_place, new.est_top + [0, 0, TIP_BELOW_TCP + 0.032])

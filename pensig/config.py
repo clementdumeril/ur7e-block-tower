@@ -95,6 +95,10 @@ class TowerConfig:
 
     # Grasp height: the fingertips stay this far above the bottom of the block, and so above the table.
     finger_above_bottom: float = 0.015
+    # ... or higher on a block taller than the fingers, so the palm stays this far above its top. With the bottom
+    # rule alone the palm pressed the measured black block (80 mm, fingers 60 mm) into the table: the script
+    # stopped 9/30 times, tower_sac_41216771 4M 20/60 (the real arm got grasp_raise 10 mm for it). None: off.
+    palm_above_top: float | None = 0.012
 
     pos_noise: float = 0.003
     yaw_noise: float = float(np.deg2rad(4.0))

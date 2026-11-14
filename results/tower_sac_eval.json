@@ -1,0 +1,162 @@
+{
+  "run": "tower_sac_41216771 (commit a4e8b4a), deterministic policy, 100 towers per block set, camera error on",
+  "measured_blocks": "green 50x50, black 40x80, red 35x30 mm",
+  "random_blocks": "pensig.curriculum.random_sizes",
+  "checkpoints": {
+    "2M steps": {
+      "measured": {
+        "full_tower": 0.36,
+        "stage0": 0.51,
+        "stage1": 0.706,
+        "failures": {
+          "stage1:timeout": 7,
+          "stage0:stop": 32,
+          "stage0:knocked": 6,
+          "stage1:toppled": 4,
+          "stage0:timeout": 9,
+          "stage0:toppled": 2,
+          "stage1:knocked": 2,
+          "stage1:stop": 2
+        }
+      },
+      "random": {
+        "full_tower": 0.47,
+        "stage0": 0.63,
+        "stage1": 0.746,
+        "failures": {
+          "stage0:knocked": 4,
+          "stage0:toppled": 4,
+          "stage1:stop": 3,
+          "stage0:stop": 5,
+          "stage0:timeout": 24,
+          "stage1:toppled": 3,
+          "stage1:timeout": 9,
+          "stage1:knocked": 1
+        }
+      }
+    },
+    "3M steps": {
+      "measured": {
+        "full_tower": 0.27,
+        "stage0": 0.59,
+        "stage1": 0.458,
+        "failures": {
+          "stage1:timeout": 14,
+          "stage0:stop": 29,
+          "stage0:timeout": 9,
+          "stage1:stop": 11,
+          "stage0:knocked": 1,
+          "stage1:knocked": 3,
+          "stage1:toppled": 4,
+          "stage0:toppled": 2
+        }
+      },
+      "random": {
+        "full_tower": 0.43,
+        "stage0": 0.73,
+        "stage1": 0.589,
+        "failures": {
+          "stage1:timeout": 13,
+          "stage0:timeout": 13,
+          "stage1:knocked": 6,
+          "stage1:stop": 5,
+          "stage0:stop": 9,
+          "stage1:toppled": 6,
+          "stage0:toppled": 5
+        }
+      }
+    },
+    "4M steps": {
+      "measured": {
+        "full_tower": 0.33,
+        "stage0": 0.57,
+        "stage1": 0.579,
+        "failures": {
+          "stage1:knocked": 1,
+          "stage1:timeout": 6,
+          "stage0:stop": 34,
+          "stage0:timeout": 5,
+          "stage1:stop": 16,
+          "stage1:toppled": 1,
+          "stage0:toppled": 3,
+          "stage0:knocked": 1
+        }
+      },
+      "random": {
+        "full_tower": 0.5,
+        "stage0": 0.68,
+        "stage1": 0.735,
+        "failures": {
+          "stage1:knocked": 2,
+          "stage1:timeout": 8,
+          "stage0:timeout": 15,
+          "stage0:stop": 17,
+          "stage1:toppled": 5,
+          "stage1:stop": 2,
+          "stage1:dropped": 1
+        }
+      }
+    },
+    "5M steps": {
+      "measured": {
+        "full_tower": 0.13,
+        "stage0": 0.57,
+        "stage1": 0.228,
+        "failures": {
+          "stage1:timeout": 21,
+          "stage0:stop": 38,
+          "stage1:stop": 21,
+          "stage0:toppled": 1,
+          "stage1:dropped": 2,
+          "stage0:timeout": 4
+        }
+      },
+      "random": {
+        "full_tower": 0.35,
+        "stage0": 0.68,
+        "stage1": 0.515,
+        "failures": {
+          "stage0:timeout": 12,
+          "stage1:toppled": 9,
+          "stage1:timeout": 21,
+          "stage0:knocked": 1,
+          "stage0:stop": 14,
+          "stage1:dropped": 1,
+          "stage0:toppled": 5,
+          "stage1:stop": 2
+        }
+      }
+    },
+    "7M steps": {
+      "measured": {
+        "full_tower": 0.08,
+        "stage0": 0.39,
+        "stage1": 0.205,
+        "failures": {
+          "stage1:stop": 23,
+          "stage0:stop": 51,
+          "stage0:timeout": 7,
+          "stage1:knocked": 3,
+          "stage1:toppled": 3,
+          "stage0:toppled": 3,
+          "stage1:timeout": 2
+        }
+      },
+      "random": {
+        "full_tower": 0.09,
+        "stage0": 0.48,
+        "stage1": 0.188,
+        "failures": {
+          "stage1:toppled": 9,
+          "stage1:stop": 14,
+          "stage0:stop": 17,
+          "stage0:timeout": 24,
+          "stage0:toppled": 10,
+          "stage1:timeout": 11,
+          "stage1:knocked": 5,
+          "stage0:knocked": 1
+        }
+      }
+    }
+  }
+}

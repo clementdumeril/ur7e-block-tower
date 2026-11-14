@@ -47,7 +47,34 @@ First run on the Savio cluster, 26M steps in 11 h, 50 episodes from each start p
 |---|---|---|---|---|---|---|
 | Success | 90 % | 76 % | 74 % | 6 % | 0 % | 0 % |
 
-The policy learned the end of the task alone and passed the carry and lift phases at 5M steps, then stalled on the grasp and forgot them: most failures from the earlier phases are timeouts, with the arm hovering, and protective stops against the table or the tower. The second run resumes from the 5M checkpoint and only moves on when every phase in use stays above 50 %. No full tower from the plain reset yet.
+The policy learned the end of the task alone and passed the carry and lift phases at 5M steps, then stalled on the grasp and forgot them: most failures from the earlier phases are timeouts, with the arm hovering, and protective stops against the table or the tower. PPO never got further; SAC below did.
+
+## End-to-end SAC
+
+Why: the residual policy needs the script at run time. The goal is one network that picks and stacks alone.
+
+How ([`train_tower_sac.py`](../scripts/train_tower_sac.py), [`rlpd.py`](../pensig/rlpd.py)):
+
+- SAC, off-policy, so failures and 2000 scripted episodes are reused: half of every batch comes from the script (RLPD, Ball et al. 2023), with a cloning term on that half (TD3+BC, Fujimoto and Gu 2021). The actor starts as a copy of the script.
+- Start-state curriculum as above, gated on the deterministic policy, the one the arm runs.
+- 29 observations: TCP pose, block estimates relative to the TCP, wrist force, gripper, previous action. No script phase, no clock.
+
+Result, 100 towers per checkpoint, deterministic policy, camera error on ([`tower_sac_eval.json`](../results/tower_sac_eval.json)):
+
+| Checkpoint | Full tower, random blocks | First block | Full tower, measured blocks |
+|---|---|---|---|
+| 2M steps | 47 % | 63 % | 36 % |
+| 4M steps | **50 %** | 68 % | 33 % |
+| 7M steps | 9 % | 48 % | 8 % |
+
+What it took. Each failed run was the policy reading a shortcut in its observation:
+
+- Elapsed time in the observation: it closed the gripper on the clock, not on the block. Removed.
+- Open above the tower looked the same before and after a placement: it closed on nothing, flew to the tower and hovered. Added a flag set when the gripper closes on the block.
+- The wrist close-up of the tower was only ever taken after a carry, so the policy used it as a phase cue and failed whenever it started over the tower, as after its own first placement. Half the episodes now start there; full towers went from 0-7 % to 50 %.
+- Gripper noise: the mean action stayed closed while sampled actions opened by chance. Gripper std capped, gripper left out of the cloning term.
+- After 4M steps the replay buffer (3M) wrapped, the critic loss doubled and towers fell to 9 %. Buffer now 12M, and the best checkpoint is kept.
+- Most failures on the measured blocks were protective stops: grasping 15 mm over the bottom put the palm into the 80 mm black block. The grasp now rises on tall blocks; the next run trains with it.
 
 ## What the simulation taught me
 

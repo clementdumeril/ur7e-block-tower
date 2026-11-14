@@ -35,7 +35,9 @@ def random_sizes(rng) -> dict:
 
 # What a reset changes in the model (TowerEnv._randomize) and in the data, plus the env's own state.
 MODEL_FIELDS = ("geom_size", "geom_aabb", "geom_rbound", "geom_friction", "body_mass", "body_inertia", "body_ipos",
-                "body_iquat", "actuator_forcerange")
+                "body_iquat", "actuator_forcerange",
+                # derived from the masses by mj_setConst at reset (TowerEnv._randomize)
+                "body_subtreemass", "body_invweight0", "dof_invweight0", "dof_M0")
 DATA_FIELDS = ("qpos", "qvel", "act", "ctrl", "qacc_warmstart")
 STATIC = {"model", "data", "ik", "render_mode", "n_sub", "finger_qadr", "qadr", "dadr", "arm_act", "grip_act",
           "tcp_sid", "ft_adr", "gid", "bid", "gripper_geoms", "pad_geoms", "action_space", "observation_space",
@@ -59,6 +61,21 @@ def restore(e, s: dict):
     mujoco.mj_forward(e.model, e.data)
 
 
+def binary_grip(env, action, threshold: float = 0.5) -> np.ndarray:
+    """The gripper as on the lab arm (/toggle_gripper, tower_ros.policy.GripperModel): closed at full speed once the
+    command goes below -threshold, open above +threshold, unchanged in between. With the sim's finger speed taken
+    as is, PPO exploring around -0.3 got weak grips that slipped, and learned that closing on a block fails.
+    Stateless: the last applied command (TowerEnv.prev_action) holds the state, so restored states keep theirs."""
+    a = np.clip(np.array(action, dtype=np.float64), -1.0, 1.0)
+    closed = env.unwrapped.prev_action[4] < 0
+    if a[4] < -threshold:
+        closed = True
+    elif a[4] > threshold:
+        closed = False
+    a[4] = -1.0 if closed else 1.0
+    return a
+
+
 def frontier(level: int) -> int:
     """The earliest start phase at this level, -1 for the plain reset."""
     return N_PHASES - 1 - level if level < N_PHASES else -1
@@ -68,7 +85,7 @@ class ScriptStart(gym.Wrapper):
     """TowerEnv whose episodes start where the script hands over. info["start_phase"]: -1 for the plain reset."""
 
     def __init__(self, env, sizes: dict | None = None, noise=(0.0, 0.1), save_prob: float = 0.25, uses: int = 6,
-                 pool: int = 40, seed: int = 0):
+                 pool: int = 40, seed: int = 0, chain: float = 0.5):
         super().__init__(env)
         self.sizes = sizes  # None: random sizes at every reset
         self.noise = noise
@@ -82,6 +99,11 @@ class ScriptStart(gym.Wrapper):
         self.fixed_phase = None  # set: every episode starts at this phase (evaluation)
         self.weights = None  # per start phase -1..7: more episodes where the policy fails more
         self.start_phase = -1
+        # After the policy's own stage 0 success, the next episode is often stage 1 from that state, as at run
+        # time: tower_sac_41037952 placed the first block 79 % of the time and the second 1 %, having only seen
+        # stage 1 start on a tower the reset had built, with the gripper away from it.
+        self.chain = chain
+        self._chain_ready = False
 
     def set_level(self, level: int):
         self.level = int(level)
@@ -108,6 +130,13 @@ class ScriptStart(gym.Wrapper):
         e = self.env.unwrapped
         if seed is not None:
             self.rng = np.random.default_rng(seed)
+        chain, self._chain_ready = self._chain_ready, False
+        if chain and self.fixed_phase is None and self.rng.random() < self.chain:
+            obs, info = e.next_stage()
+            self.start_phase = -1
+            info["start_phase"] = -1
+            info["chained"] = True
+            return obs, info
         p = self._sample_phase()
         for _ in range(10):
             if p < 0 or self.pool[p]:
@@ -153,7 +182,34 @@ class ScriptStart(gym.Wrapper):
             if term or trunc:
                 return
 
+    def script_episodes(self, n: int) -> tuple[dict, int]:
+        """n episodes driven by the script from the plain reset, random sizes, as replay transitions (obs, act,
+        rew, next, done: terminated or out of time) plus "clean", the script's action before the noise, to clone
+        (the noise spreads the states, the label stays the script's: DART, Laskey et al. 2017).
+        Returns them and the number of successes."""
+        e = self.env.unwrapped
+        out = {k: [] for k in ("obs", "act", "rew", "next", "done", "clean")}
+        wins = 0
+        for _ in range(n):
+            self._new_sizes()
+            obs, _ = self.env.reset()
+            self.script.reset()
+            noise = self.rng.choice(self.noise)
+            done = False
+            while not done:
+                a = binary_grip(self.env, self.script(e))
+                clean = a.copy()
+                a[:4] = np.clip(a[:4] + noise * self.rng.standard_normal(4), -1, 1)
+                nxt, r, term, trunc, info = self.env.step(a)
+                done = term or trunc
+                for k, v in zip(out, (obs, a, r, nxt, done, clean)):
+                    out[k].append(v)
+                obs = nxt
+            wins += bool(info["is_success"])
+        return {k: np.asarray(v, np.float32) for k, v in out.items()}, wins
+
     def step(self, action):
-        obs, r, term, trunc, info = self.env.step(action)
+        obs, r, term, trunc, info = self.env.step(binary_grip(self.env, action))
         info["start_phase"] = self.start_phase
+        self._chain_ready = bool(info["is_success"]) and self.env.unwrapped.stage == 0
         return obs, r, term, trunc, info

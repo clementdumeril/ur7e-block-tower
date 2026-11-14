@@ -23,7 +23,7 @@ BLOCK_RGBA = {"green": "0.2 0.75 0.3 1", "black": "0.06 0.06 0.06 1", "red": "0.
 BLOCK_MAX = 0.03  # half size the boxes are compiled at, shrunk at reset
 TIP_BELOW_TCP = HANDE_BODY + FINGER_LEN - TCP_Z
 OBS_CENTER = np.array([0.5, 0.0, 0.1])
-SHAPING_GAMMA = 0.98  # the PPO discount in scripts/train.py
+SHAPING_GAMMA = 0.98  # TowerConfig.shaping_gamma default: the PPO discount in scripts/train.py
 SUCCESS_BONUS = 10.0
 FAILURE_PENALTY = 3.0  # protective stop, dropped, toppled or knocked block
 COS_UPRIGHT = np.cos(np.deg2rad(5.0))
@@ -50,6 +50,22 @@ def wrap_quarter(angle: float) -> float:
     return (angle + np.pi / 4) % (np.pi / 2) - np.pi / 4
 
 
+def finger_above_bottom(cfg, height: float) -> float:
+    """Fingertips over the held block's bottom: cfg.finger_above_bottom, or higher so the palm clears the top."""
+    if cfg.palm_above_top is None:
+        return cfg.finger_above_bottom
+    return max(cfg.finger_above_bottom, height - FINGER_LEN + cfg.palm_above_top)
+
+
+def carry_latch(carried: bool, closed: bool, tcp, est_grasp, tol: float = 0.015) -> bool:
+    """Whether the block was taken this stage, from what the real arm knows too: set when the gripper is closed
+    with the TCP within tol of the grasp estimate on every axis (tower_ros.policy.closing_on_block), cleared when
+    it opens there again (a grasp given up). Opening anywhere else, as over the tower, keeps it."""
+    if np.all(np.abs(np.asarray(tcp, float) - est_grasp) < tol):
+        return bool(closed)
+    return carried
+
+
 class TowerEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 20}
 
@@ -58,6 +74,7 @@ class TowerEnv(gym.Env):
         self.render_mode = render_mode
         self.model = build_model(WORLD_XML)
         self.model.opt.timestep = self.cfg.sim_dt
+        self.model.opt.noslip_iterations = self.cfg.noslip_iterations
         self.data = mujoco.MjData(self.model)
         self.n_sub = int(round(self.cfg.control_dt / self.cfg.sim_dt))
         self.ik = DiffIK(self.model)
@@ -141,6 +158,10 @@ class TowerEnv(gym.Env):
             m.geom_friction[self.gid[pad], 0] = u(cfg.pad_friction)
         force = u(cfg.grip_force)
         m.actuator_forcerange[self.grip_act] = (-force, force)
+        # The contact softness MuJoCo derives from the masses (body_invweight0 and co) is computed at compile
+        # time, for 30 g blocks. Left there, a 50-60 g block held off-centre made the solver diverge: 22 of 100
+        # noisy grasps, most of them on heavy blocks. Recompute it for the new masses and sizes.
+        mujoco.mj_setConst(m, d)
 
         on_table = ["green", "black", "red"] if stage == 0 else ["green", "red"]
         spots = []
@@ -165,10 +186,13 @@ class TowerEnv(gym.Env):
             d.qpos[qa:qa + 3] = pos
             d.qpos[qa + 3:qa + 7] = quat_z(yaw)
 
-        held = STAGES[stage][0]
+        held, target = STAGES[stage]
         tallest = max(pos[2] + self.sizes[b][1] / 2 for b, (pos, _) in poses.items())
-        start = np.array([*(poses[held][0][:2] + rng.uniform(-cfg.start_xy_spread, cfg.start_xy_spread, 2)),
-                          tallest + TIP_BELOW_TCP + u(cfg.start_above)])
+        if rng.random() < cfg.start_over_target:
+            start = np.array([*poses[target][0][:2], tallest + TIP_BELOW_TCP + u(cfg.start_over_target_above)])
+        else:
+            start = np.array([*(poses[held][0][:2] + rng.uniform(-cfg.start_xy_spread, cfg.start_xy_spread, 2)),
+                              tallest + TIP_BELOW_TCP + u(cfg.start_above)])
         start = np.clip(start, cfg.target_lo, cfg.target_hi)
         yaw = rng.uniform(-np.pi, np.pi)
         q = self.ik.solve(Q_SEED, start, down_rotation(yaw), iters=200, tol=1e-7)
@@ -211,9 +235,8 @@ class TowerEnv(gym.Env):
         self.est_top = tp + [0, 0, self.sizes[self.target][1] / 2] + self._noise(cfg.pos_noise, 3)
         self.est_target_yaw = tyaw + self._noise(cfg.yaw_noise)
         self.est_target_width = self.sizes[self.target][0] + self._noise(cfg.size_noise)
-        # The TCP holds the block this far above its bottom, so it ends this far above the target's top.
-        self.grasp_z_off = TIP_BELOW_TCP + cfg.finger_above_bottom
         self.wrist_held = self.wrist_target = False
+        self.carried = False
         self._update_targets()
 
         self.start_pos = {b: self.data.xpos[self.bid[b]].copy() for b in BLOCKS if b != self.held}
@@ -235,6 +258,8 @@ class TowerEnv(gym.Env):
         return self.np_random.normal(0, sigma, n)
 
     def _update_targets(self):
+        # The TCP holds the block this far above its bottom, so it ends this far above the target's top.
+        self.grasp_z_off = TIP_BELOW_TCP + finger_above_bottom(self.cfg, self.est_size[1])
         self.est_grasp = self.est_held + [0, 0, self.grasp_z_off - self.est_size[1] / 2]
         self.est_place = self.est_top + [0, 0, self.grasp_z_off]
 
@@ -276,7 +301,7 @@ class TowerEnv(gym.Env):
         self.t += 1
         self._read_force()
 
-        if self._unstable():
+        if self._unstable() or self._blown_up():
             # MuJoCo has already reset the state; end the episode without a learning signal.
             info = self._info(False)
             info["unstable"] = True
@@ -285,11 +310,14 @@ class TowerEnv(gym.Env):
         reward, success, failure = self._reward(a)
         self._wrist_look()
         self.prev_action = a
+        self.carried = carry_latch(self.carried, a[4] < 0, self.data.site_xpos[self.tcp_sid], self.est_grasp)
         if stopped:
             reward -= FAILURE_PENALTY
             success = False
         terminated = success or bool(failure) or stopped
         truncated = self.t >= cfg.episode_steps
+        if truncated and not terminated:
+            reward -= cfg.timeout_penalty
         info = self._info(success, failure)
         info["stopped"] = stopped
         return self._obs(), reward, terminated, truncated, info
@@ -303,7 +331,7 @@ class TowerEnv(gym.Env):
         for k in range(self.n_sub):
             d.ctrl[self.arm_act] = self.q_cmd + (k + 1) / self.n_sub * (q_new - self.q_cmd)
             mujoco.mj_step(m, d)
-            if self._unstable():
+            if self._unstable() or self._blown_up():
                 break
             if self._protective_stop():
                 stopped = True
@@ -314,9 +342,12 @@ class TowerEnv(gym.Env):
     def _protective_stop(self) -> bool:
         """Like the UR protective stop: the gripper or the held block pressed hard against the table or
         another block, or a block knocked away. A released block falling onto the tower does not count: the arm
-        only feels the block while a finger touches it."""
+        only feels the block while a finger touches it. Nor does the held block's speed: the fingers closing or
+        opening on it give 2-3 m/s for one 2 ms step, harmless, and the UR does not watch blocks."""
         d = self.data
         for b in BLOCKS:
+            if b == self.held:
+                continue
             v = d.qvel[self.dadr[b]:self.dadr[b] + 3]
             if v @ v > 4.0:
                 return True
@@ -332,6 +363,12 @@ class TowerEnv(gym.Env):
         adr = adr[adr >= 0]
         # With elliptic cones the first constraint row of a contact is its normal force.
         return bool(adr.size and d.efc_force[adr].max() > self.cfg.stop_force)
+
+    def _blown_up(self) -> bool:
+        """A block faster than 10 m/s: the solver diverged, nothing the arm did. Ends the episode as unstable,
+        without the protective stop's penalty."""
+        v = self.data.qvel
+        return any(v[self.dadr[b]:self.dadr[b] + 3] @ v[self.dadr[b]:self.dadr[b] + 3] > 100.0 for b in BLOCKS)
 
     def _unstable(self) -> bool:
         w = self.data.warning
@@ -394,7 +431,7 @@ class TowerEnv(gym.Env):
         # placements succeeding, PPO learned to stall there.
         if self.phi_prev is None:
             self.phi_prev = phi
-        reward = SHAPING_GAMMA * phi - self.phi_prev
+        reward = cfg.shaping_gamma * phi - self.phi_prev
         self.phi_prev = phi
         reward -= 0.2 * hit
         reward -= 0.01 * float(a @ a)
@@ -442,10 +479,15 @@ class TowerEnv(gym.Env):
             [self.wrist_held, self.wrist_target],
             self.force / 10,
             self.prev_action,
-            [self.t / self.cfg.episode_steps],
+            [self._slot27()],
             [self.stage],
         ])
         return obs.astype(np.float32)
+
+    def _slot27(self) -> float:
+        if self.cfg.carry_in_obs:
+            return float(self.carried)
+        return self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0
 
     def _info(self, success: bool, failure: str = "") -> dict:
         return {"is_success": success, "failure": failure, "dropped": failure == "dropped", "stopped": False,

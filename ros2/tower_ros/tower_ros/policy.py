@@ -20,6 +20,7 @@ from tower_ros.geometry import BLOCKS, BlockEstimate, ToolPose, wrap_pi, wrap_qu
 
 # pensig/tower.py and pensig/scene.py, copied so this module imports without MuJoCo (the tests compare them).
 TIP_BELOW_TCP = 0.012  # HANDE_BODY + FINGER_LEN - TCP_Z: the sim TCP is this far above the fingertips
+FINGER_LEN = 0.06  # pensig/scene.py, palm to fingertips
 MAX_OPEN = 0.025  # Hand-E stroke per finger
 OBS_CENTER = np.array([0.5, 0.0, 0.1])
 N_PHASES = 8  # ScriptedStack phases, one-hot in the residual observation
@@ -36,12 +37,15 @@ class SimConfig:
     target_lo: tuple = (0.25, -0.35, 0.02)
     target_hi: tuple = (0.75, 0.35, 0.45)
     finger_above_bottom: float = 0.015
+    palm_above_top: float | None = None  # TowerConfig.palm_above_top; None (bottom rule only) for older runs
     wrist_camera: bool = True
     wrist_radius: float = 0.01
     wrist_max_height: float = 0.25
     start_above: tuple = (0.08, 0.16)
     xy_lo: tuple = (0.38, -0.18)
     xy_hi: tuple = (0.60, 0.18)
+    time_in_obs: bool = True  # runs from before the field (tower_v6) had the clock in obs[27]
+    carry_in_obs: bool = False  # TowerConfig.carry_in_obs, the carry latch in obs[27]; False for older runs
 
     @classmethod
     def from_run(cls, run_dir) -> "SimConfig":
@@ -134,8 +138,8 @@ class StageState:
         self.est_size = np.asarray(held_size, float)
         self.est_target_width = float(target_width)
         self.held_close, self.target_close = held_close, target_close
-        self.grasp_z_off = TIP_BELOW_TCP + cfg.finger_above_bottom
         self.wrist_held = self.wrist_target = False
+        self.carried = False
         self.lifted = False
         self.target_pos = np.asarray(tcp, float).copy()
         self.target_yaw = float(yaw)
@@ -149,6 +153,10 @@ class StageState:
         return self
 
     def update_targets(self):
+        above = self.cfg.finger_above_bottom
+        if self.cfg.palm_above_top is not None:
+            above = max(above, self.est_size[1] - FINGER_LEN + self.cfg.palm_above_top)
+        self.grasp_z_off = TIP_BELOW_TCP + above
         self.est_grasp = self.est_held + [0, 0, self.grasp_z_off - self.est_size[1] / 2]
         self.est_place = self.est_top + [0, 0, self.grasp_z_off]
 
@@ -176,8 +184,14 @@ class StageState:
         self.update_targets()
 
     def obs(self, tcp, yaw: float, opening: float) -> np.ndarray:
-        """TowerEnv._obs, 29 values."""
+        """TowerEnv._obs, 29 values. prev_action[4] must be the gripper command as applied (+-1 after the
+        binary gripper), as TowerEnv saw it in training: closed below 0."""
         tcp = np.asarray(tcp, float)
+        self.carried = carry_latch(self.carried, self.prev_action[4] < 0, tcp, self.est_grasp)
+        if self.cfg.carry_in_obs:
+            slot27 = float(self.carried)
+        else:
+            slot27 = self.t / self.cfg.episode_steps if self.cfg.time_in_obs else 0.0
         return np.concatenate([
             tcp - OBS_CENTER,
             [math.cos(yaw), math.sin(yaw)],
@@ -191,7 +205,7 @@ class StageState:
             [self.wrist_held, self.wrist_target],
             self.force / 10,
             self.prev_action,
-            [self.t / self.cfg.episode_steps],
+            [slot27],
             [self.stage],
         ]).astype(np.float32)
 
@@ -266,6 +280,13 @@ class GripperModel:
 def closing_on_block(tcp, est_grasp, tol: float = 0.015) -> bool:
     """The fingers close around the held block when the TCP is at the grasp estimate."""
     return bool(np.all(np.abs(np.asarray(tcp, float) - est_grasp) < tol))
+
+
+def carry_latch(carried: bool, closed: bool, tcp, est_grasp, tol: float = 0.015) -> bool:
+    """pensig.tower.carry_latch: set when closed at the grasp estimate, cleared when opened there."""
+    if closing_on_block(tcp, est_grasp, tol):
+        return bool(closed)
+    return carried
 
 
 # ---------------------------------------------------------------- the trained network

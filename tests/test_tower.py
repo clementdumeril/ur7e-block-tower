@@ -32,6 +32,34 @@ def test_step_api(env):
         assert {"is_success", "dropped", "stopped", "stage"} <= info.keys()
 
 
+def test_no_clock_in_the_observation():
+    e = TowerEnv(TowerConfig())
+    e.reset(seed=2)
+    for _ in range(10):
+        obs, *_ = e.step(np.zeros(5))
+    assert obs[27] == 0.0
+
+
+def test_carry_flag_in_the_observation():
+    """obs[27]: 0 until the script closes on the block, then 1, still 1 once the gripper opens over the tower.
+    Closing high above the block does not set it."""
+    from pensig.tower_scripted import ScriptedStack
+    e = TowerEnv(TowerConfig().noiseless())
+    e.reset(seed=3, options={"stage": 0})
+    script, seen = ScriptedStack(), []
+    for _ in range(e.cfg.episode_steps):
+        obs, _, term, trunc, _ = e.step(script(e))
+        seen.append((script.phase, obs[27]))
+        if term or trunc:
+            break
+    assert all(f == 0.0 for ph, f in seen if ph < 2)
+    assert all(f == 1.0 for ph, f in seen if ph >= 3)
+    e.reset(seed=3, options={"stage": 0})
+    for _ in range(5):
+        obs, *_ = e.step(np.array([0, 0, 0, 0, -1.0]))
+    assert obs[27] == 0.0
+
+
 def test_residual_obs_shape():
     env = ResidualTowerEnv(TowerConfig())
     obs, _ = env.reset(seed=0)
@@ -85,3 +113,93 @@ def test_script_start_hands_over_at_phase():
     assert 4 <= info["start_phase"] <= 7
     _, _, _, _, info = w.step(np.zeros(5))
     assert "start_phase" in info
+
+
+def test_stage_one_follows_the_policys_own_stage_zero():
+    from pensig.curriculum import ScriptStart
+
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=4, chain=1.0)
+    w.fixed_phase = 6  # the script opens and lifts: success within a few steps
+    w.reset(seed=4, options={"stage": 0})
+    e = w.unwrapped
+    assert e.stage == 0
+    done = False
+    while not done:
+        _, _, term, trunc, info = w.step(w.script(e))
+        done = term or trunc
+    assert info["is_success"]
+    w.fixed_phase = None
+    obs, info = w.reset()
+    assert info.get("chained") and e.stage == 1 and e.t == 0 and info["start_phase"] == -1
+    _, info = w.reset()
+    assert not info.get("chained")  # only right after a stage 0 success
+
+
+def test_demo_buffer_mixes_batches_and_critic_has_layernorm():
+    pytest.importorskip("stable_baselines3")
+    from stable_baselines3 import SAC
+    from torch import nn
+
+    from pensig.curriculum import ScriptStart
+    from pensig.rlpd import DemoMixBuffer, LNSACPolicy
+
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=5)
+    demo, wins = w.script_episodes(1)
+    n = len(demo["obs"])
+    assert n > 10 and demo["done"][-1] == 1 and set(np.unique(demo["act"][:, 4])) <= {-1.0, 1.0}
+    model = SAC(LNSACPolicy, w, buffer_size=1000, batch_size=8, learning_starts=0,
+                replay_buffer_class=DemoMixBuffer, replay_buffer_kwargs=dict(demo_ratio=0.5), device="cpu")
+    assert any(isinstance(m, nn.LayerNorm) for m in model.critic.modules())
+    model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"])
+    model.learn(16)
+    batch = model.replay_buffer.sample(8)
+    assert batch.observations.shape == (8, 29) and batch.rewards.shape == (8, 1)
+
+
+def test_demo_sac_clones_the_script_and_trains_with_the_bc_term():
+    pytest.importorskip("stable_baselines3")
+    import torch
+
+    from pensig.curriculum import ScriptStart
+    from pensig.rlpd import DemoMixBuffer, DemoSAC, LNSACPolicy
+
+    torch.manual_seed(0)
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=5)
+    demo, _ = w.script_episodes(2)
+    model = DemoSAC(LNSACPolicy, w, buffer_size=1000, batch_size=32, learning_starts=0,
+                    replay_buffer_class=DemoMixBuffer, replay_buffer_kwargs=dict(demo_ratio=0.5), device="cpu",
+                    bc_weight=1.0, q_filter=True)
+    assert np.array_equal(demo["clean"][:, 4], demo["act"][:, 4])  # the noise is only on the motion
+    model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"], demo["clean"])
+    obs, act = (torch.as_tensor(demo[k]) for k in ("obs", "clean"))
+    before = float(model.bc_term(obs, act)[0])
+    model.pretrain_bc(300, 64)
+    after = float(model.bc_term(obs, act)[0])
+    assert after < 0.5 * before
+    model.learn(16)
+    stats = model.pop_bc_stats()
+    assert stats["bc"] is not None and 0.0 <= stats["kept"] <= 1.0
+    assert model.replay_buffer.last_n_demo == 16
+
+
+def test_grasp_clears_the_palm_on_a_tall_block():
+    """The measured black block (80 mm) is taller than the fingers (60 mm): the grasp rises so the palm stays
+    palm_above_top over it, and the script builds the tower without a protective stop."""
+    from pensig.scene import FINGER_LEN
+    from pensig.tower import TIP_BELOW_TCP, finger_above_bottom
+
+    cfg = TowerConfig()
+    assert finger_above_bottom(cfg, 0.04) == cfg.finger_above_bottom
+    assert finger_above_bottom(cfg, 0.08) == pytest.approx(0.08 - FINGER_LEN + cfg.palm_above_top)
+    cfg.mid_size = (0.04, 0.08)
+    env = TowerEnv(cfg)
+    script = ScriptedStack()
+    for seed in range(3):
+        env.reset(seed=seed, options={"stage": 0})
+        script.reset()
+        assert env.grasp_z_off == pytest.approx(TIP_BELOW_TCP + finger_above_bottom(cfg, env.est_size[1]))
+        done = False
+        while not done:
+            _, _, term, trunc, info = env.step(script(env))
+            done = term or trunc
+        assert info["is_success"], info

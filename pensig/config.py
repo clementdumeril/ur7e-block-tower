@@ -86,9 +86,19 @@ class TowerConfig:
 
     start_above: tuple = (0.08, 0.16)
     start_xy_spread: float = 0.10
+    # Share of resets that start over the target instead of over the held block, start_over_target_above over the
+    # tallest block: where the arm is after its own placement, when stage 1 follows stage 0. tower_sac_41150365
+    # started only over the held block, built the first block 52-85 % of the time from the reset and the second
+    # 0-14 % after its own first: from over the tower it closed on nothing or hovered there until the time ran out.
+    start_over_target: float = 0.5
+    start_over_target_above: tuple = (0.02, 0.16)
 
     # Grasp height: the fingertips stay this far above the bottom of the block, and so above the table.
     finger_above_bottom: float = 0.015
+    # ... or higher on a block taller than the fingers, so the palm stays this far above its top. With the bottom
+    # rule alone the palm pressed the measured black block (80 mm, fingers 60 mm) into the table: the script
+    # stopped 9/30 times, tower_sac_41216771 4M 20/60 (the real arm got grasp_raise 10 mm for it). None: off.
+    palm_above_top: float | None = 0.012
 
     pos_noise: float = 0.003
     yaw_noise: float = float(np.deg2rad(4.0))
@@ -102,16 +112,38 @@ class TowerConfig:
     wrist_pos_noise: float = 0.001
     wrist_yaw_noise: float = float(np.deg2rad(1.5))
 
+    # The elapsed fraction of the episode in the observation (obs[27]); 0 when off. Off: the curriculum restarts
+    # the clock at every handover, and tower_sac_41037952 used it to tell where it was in the task. With the
+    # clock at 0 it closed the gripper as soon as it was handed over above the block, too high, and from the
+    # plain reset it waited at the grasp for ~90 steps (deterministic: 20/30 from the reset, 0/30 with the
+    # clock held at 0). On the real arm the pace differs from the sim anyway.
+    time_in_obs: bool = False
+    # obs[27] says whether the gripper has closed on the held block this stage (carry_latch), in place of the
+    # clock. Without it, the gripper open above the tower looked the same after a placement as with the block
+    # never picked: tower_sac_41097733 closed on nothing above the block, flew to the tower, opened there and
+    # hovered (phase-1 starts 0 % for 4 h); its critic valued that above going down to the block (2.8 vs 2.4).
+    carry_in_obs: bool = True
+
     grip_force: tuple = (10.0, 20.0)
     pad_friction: tuple = (0.6, 1.2)
     latency_prob: float = 0.3
 
     stop_force: float = 25.0
+    # MuJoCo noslip passes, the scene's 5. Divergent grasps (block speeds up to 1e8 m/s, seen by the learned
+    # policies as protective stops) came from stale mass-derived constants, fixed in TowerEnv._randomize; with
+    # that fix, 99 of 100 noisy grasps with 5, 93 with 0.
+    noslip_iterations: int = 5
 
     place_tol: float = 0.008
     place_yaw_tol: float = float(np.deg2rad(10.0))
     clear_height: float = 0.01
     hold_steps: int = 3
+
+    # Reward shaping discount, the PPO gamma, and a penalty when the episode runs out of steps. The defaults are
+    # those the residual policies were trained with; the end-to-end curriculum uses 0.995 and 3.0, else hovering
+    # until the time limit pays as much as trying a grasp 70 steps from success.
+    shaping_gamma: float = 0.98
+    timeout_penalty: float = 0.0
 
     def noiseless(self) -> "TowerConfig":
         cfg = TowerConfig(**{k: getattr(self, k) for k in self.__dataclass_fields__})

@@ -29,5 +29,8 @@ RESUME=()
 [ -n "$2" ] && RESUME+=(--level "$2")
 # Buffer of 12M: the whole run (about 9M steps) without overwriting. tower_sac_41216771 had 3M, full at 3M steps;
 # its critic loss doubled after that and its towers fell from 45-60 % to 5-10 %.
+# tower_sac_41283256 fell the same way at 6M with the buffer far from full: the entropy in the critic's target
+# made a protective stop look cheap. The target now leaves it out (SAC-Lite, pensig/rlpd.py);
+# --entropy-backup restores plain SAC.
 "$VENV/bin/python" -u scripts/train_tower_sac.py --out "$RUNS/tower_sac_$SLURM_JOB_ID" "${RESUME[@]}" \
     --timesteps 30000000 --max-minutes 780 --n-envs 32 --threads 8 --eval-towers 100 --buffer 12000000

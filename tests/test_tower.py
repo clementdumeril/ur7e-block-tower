@@ -182,6 +182,30 @@ def test_demo_sac_clones_the_script_and_trains_with_the_bc_term():
     assert model.replay_buffer.last_n_demo == 16
 
 
+def test_critic_target_leaves_the_entropy_out_without_backup():
+    """SAC-Lite: with entropy_backup off the critic's target does not depend on alpha; with it on it does."""
+    pytest.importorskip("stable_baselines3")
+    import torch
+
+    from pensig.curriculum import ScriptStart
+    from pensig.rlpd import DemoMixBuffer, DemoSAC, LNSACPolicy
+
+    w = ScriptStart(TowerEnv(TowerConfig()), seed=5)
+    demo, _ = w.script_episodes(1)
+    targets = {}
+    for backup in (True, False):
+        model = DemoSAC(LNSACPolicy, w, buffer_size=1000, batch_size=32, learning_starts=0, seed=0,
+                        replay_buffer_class=DemoMixBuffer, replay_buffer_kwargs=dict(demo_ratio=1.0), device="cpu",
+                        entropy_backup=backup)
+        model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"], demo["clean"])
+        data = model.replay_buffer.sample(32)
+        for alpha in (0.0, 10.0):
+            torch.manual_seed(0)
+            targets[backup, alpha] = model.target_q(data, torch.tensor(alpha), model.gamma)
+    assert torch.allclose(targets[False, 0.0], targets[False, 10.0])
+    assert not torch.allclose(targets[True, 0.0], targets[True, 10.0])
+
+
 def test_grasp_clears_the_palm_on_a_tall_block():
     """The measured black block (80 mm) is taller than the fingers (60 mm): the grasp rises so the palm stays
     palm_above_top over it, and the script builds the tower without a protective stop."""

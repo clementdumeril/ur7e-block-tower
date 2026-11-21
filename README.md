@@ -4,6 +4,10 @@ A UR7e picks up a pen lying on a support with a learned grasp, turns it tip-down
 
 Learning where it helps, control where control is better: the grasp is a PPO policy trained under camera error and randomized pens; the signature is a Cartesian trajectory with a regulated pen force.
 
+A second task stacks the three lab blocks into a tower, with a scripted stack and an end-to-end SAC policy ([Tower of blocks](#tower-of-blocks)):
+
+![SAC policy stacking the lab blocks, six seeds](media/tower_sac_measured.gif)
+
 ## Results (simulation)
 
 Grasp success over the same 300 episodes with camera error (3 mm, 4 deg, one-step latency), and 200 with the exact pen pose:
@@ -104,6 +108,45 @@ Measured on the lab blocks (heights with a ruler: green 50 mm, black 80 mm, red 
 The policy trained on the photo sizes breaks on the real ones; 500k more steps bring it back to 83 %, still under the script.
 
 On the real UR7e (`ros2/tower_ros`), black on green worked on the first run in step mode, stopping at 3.1 N on contact. The RealSense reads the tops of the green and black blocks 8 and 15 mm low; `config/tower.yaml` corrects each block.
+
+### End-to-end policy
+
+The policy alone, no script at run time. SAC with the script's episodes in the replay buffer and a cloning term on them (`pensig/rlpd.py`, `scripts/train_tower_sac.py`); episodes start partway through the script, earlier as the policy succeeds; random block sizes; open/closed gripper as on the lab arm. 13 hours on a 32-core node.
+
+Six consecutive seeds on the measured blocks, not picked. SAC policy (3 of 6 towers):
+
+![SAC policy, measured blocks](media/tower_sac_measured.gif)
+
+Scripted stack, same seeds (6 of 6):
+
+![Scripted stack, measured blocks](media/tower_script_measured.gif)
+
+SAC policy, random block sizes (4 of 6):
+
+![SAC policy, random block sizes](media/tower_sac_random.gif)
+
+100 full towers from the start pose:
+
+| | Measured blocks | Random sizes |
+|---|---|---|
+| Scripted stack (200 towers) | **91.5 %** | not run |
+| SAC, best checkpoint (3M steps) | 60 % | 71 % |
+| SAC, final model (8.9M steps) | 10 % | 30 % |
+
+Once the first block is placed, the policy places the second 97 % of the time; nearly all failures are on the first block (18 protective stops and 15 timeouts out of 100). Four bugs broke the earlier runs:
+
+- The elapsed time was in the observation and reset at each start partway through: the policy closed the gripper by the clock, not on the block.
+- With the gripper open above the tower, nothing said whether a block had been carried there; a flag set by closing on the block fixed it.
+- Randomized block masses without `mj_setConst` made heavy grasps blow up numerically, read as protective stops.
+- The entropy term in the critic target cost more over an episode than a protective stop, so stopping early looked cheap; from 6M steps the policy closed on the top of the block. The target now leaves it out (SAC-Lite).
+
+Towers still peak around 3M steps and slide after 7M as the entropy coefficient keeps rising; `best/` keeps the peak.
+
+```
+python scripts/train_tower_sac.py --out runs/tower_sac --timesteps 30000000 --buffer 12000000
+python scripts/train_tower_sac.py --eval-only runs/tower_sac/best/best_model.zip
+python scripts/tower_grid_gif.py --policy runs/tower_sac/best/best_model.zip --out media/tower_sac_measured.gif
+```
 
 ## License
 

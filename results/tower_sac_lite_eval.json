@@ -1,0 +1,169 @@
+{
+  "curriculum": {
+    "steps": 8886432,
+    "level": 9,
+    "all_success": 0.39,
+    "success_by_start": {
+      "-1": 0.26,
+      "0": 0.31,
+      "1": 0.4,
+      "2": 0.54,
+      "3": 0.73,
+      "4": 0.68,
+      "5": 0.99,
+      "6": 0.99,
+      "7": 0.94
+    },
+    "deterministic_by_start": {
+      "-1": 0.55,
+      "0": 0.75,
+      "1": 0.8,
+      "2": 0.75,
+      "3": 0.8,
+      "4": 0.9,
+      "5": 0.9,
+      "6": 1.0,
+      "7": 1.0,
+      "tower": 0.3
+    },
+    "outcomes_by_start": {
+      "-1": {
+        "dropped": 1,
+        "knocked": 19,
+        "ok": 51,
+        "stop": 61,
+        "timeout": 38,
+        "toppled": 30
+      },
+      "0": {
+        "dropped": 3,
+        "knocked": 21,
+        "ok": 62,
+        "stop": 54,
+        "timeout": 34,
+        "toppled": 26
+      },
+      "1": {
+        "dropped": 5,
+        "knocked": 18,
+        "ok": 80,
+        "stop": 30,
+        "timeout": 36,
+        "toppled": 31
+      },
+      "2": {
+        "dropped": 4,
+        "knocked": 17,
+        "ok": 107,
+        "stop": 19,
+        "timeout": 29,
+        "toppled": 24
+      },
+      "3": {
+        "dropped": 4,
+        "knocked": 5,
+        "ok": 146,
+        "stop": 14,
+        "timeout": 13,
+        "toppled": 18
+      },
+      "4": {
+        "dropped": 7,
+        "ok": 136,
+        "stop": 24,
+        "timeout": 17,
+        "toppled": 16
+      },
+      "5": {
+        "ok": 199,
+        "stop": 1
+      },
+      "6": {
+        "ok": 198,
+        "stop": 1,
+        "timeout": 1
+      },
+      "7": {
+        "ok": 188,
+        "timeout": 12
+      }
+    },
+    "action_std": [
+      0.21,
+      0.25,
+      0.31,
+      0.21,
+      0.7
+    ],
+    "alpha": 0.0184,
+    "bc": 0.019,
+    "kept": 1.0,
+    "minutes": 780.0
+  },
+  "eval": {
+    "measured": {
+      "full_tower": 0.1,
+      "stage0": 0.61,
+      "stage1": 0.16393442622950818,
+      "failures": {
+        "stage1:knocked": 17,
+        "stage1:timeout": 10,
+        "stage0:toppled": 13,
+        "stage0:timeout": 16,
+        "stage1:toppled": 16,
+        "stage0:stop": 8,
+        "stage1:stop": 8,
+        "stage0:dropped": 2
+      }
+    },
+    "random": {
+      "full_tower": 0.3,
+      "stage0": 0.67,
+      "stage1": 0.44776119402985076,
+      "failures": {
+        "stage0:toppled": 10,
+        "stage0:timeout": 14,
+        "stage1:toppled": 11,
+        "stage1:stop": 4,
+        "stage0:stop": 9,
+        "stage1:knocked": 14,
+        "stage1:timeout": 8
+      }
+    }
+  },
+  "best": {
+    "steps": 3000000,
+    "towers_last_3_gates": [
+      0.65,
+      0.7,
+      0.85
+    ]
+  },
+  "eval_best": {
+    "measured": {
+      "full_tower": 0.6,
+      "stage0": 0.62,
+      "stage1": 0.967741935483871,
+      "failures": {
+        "stage0:stop": 18,
+        "stage0:timeout": 15,
+        "stage1:timeout": 2,
+        "stage0:toppled": 4,
+        "stage0:knocked": 1
+      }
+    },
+    "random": {
+      "full_tower": 0.71,
+      "stage0": 0.78,
+      "stage1": 0.9102564102564102,
+      "failures": {
+        "stage1:timeout": 4,
+        "stage0:timeout": 10,
+        "stage0:stop": 11,
+        "stage1:toppled": 2,
+        "stage1:knocked": 1,
+        "stage0:toppled": 1
+      }
+    }
+  }
+}

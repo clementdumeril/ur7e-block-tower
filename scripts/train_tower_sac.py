@@ -73,6 +73,8 @@ def main():
     ap.add_argument("--bc-grip", type=float, default=0.0, help="gripper weight in the cloning term after pre-training")
     ap.add_argument("--det", type=float, default=0.0, help="weight of -Q at the mean action in the actor loss")
     ap.add_argument("--q-filter", action="store_true", help="clone only where the critic prefers the script")
+    ap.add_argument("--entropy-backup", action="store_true",
+                    help="keep -alpha * log pi in the critic's target (plain SAC); off: SAC-Lite, see pensig/rlpd.py")
     ap.add_argument("--bc-pretrain", type=int, default=50_000, help="actor-only cloning steps before training")
     ap.add_argument("--utd", type=float, default=0.25, help="gradient steps per environment step")
     ap.add_argument("--batch", type=int, default=256)
@@ -128,7 +130,7 @@ def main():
         model.learning_starts = model.num_timesteps + 20_000  # refill the online buffer first
         model.tensorboard_log = str(args.out)
         model.bc_weight, model.q_filter, model.bc_stats = args.bc, args.q_filter, {"bc": [], "kept": []}
-        model.bc_grip, model.det_weight = args.bc_grip, args.det
+        model.bc_grip, model.det_weight, model.entropy_backup = args.bc_grip, args.det, args.entropy_backup
         print(f"resuming from {args.resume} at level {args.level}", flush=True)
     else:
         venv = VecNormalize(venv, norm_obs=True, norm_reward=False, clip_obs=10.0, gamma=args.gamma)
@@ -140,7 +142,7 @@ def main():
                         replay_buffer_kwargs=dict(demo_ratio=args.demo_ratio, handle_timeout_termination=False),
                         policy_kwargs=dict(net_arch=args.net), seed=args.seed, device="cpu", verbose=0,
                         tensorboard_log=str(args.out), bc_weight=args.bc, q_filter=args.q_filter,
-                        bc_grip=args.bc_grip, det_weight=args.det)
+                        bc_grip=args.bc_grip, det_weight=args.det, entropy_backup=args.entropy_backup)
     model.replay_buffer.set_demos(demo["obs"], demo["act"], demo["rew"], demo["next"], demo["done"], demo["clean"])
     if args.bc_pretrain and not args.resume:
         t0 = time.time()

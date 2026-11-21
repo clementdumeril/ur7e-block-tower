@@ -24,6 +24,14 @@ pre-training the cloning term leaves the gripper out (`bc_grip`), and the grippe
 (GripActor): its sampled command then follows the mean, and the SAC loss moves the mean where the critic prefers.
 Maximising Q at the mean action as well (`det_weight`, the DDPG/TD3 gradient) is an option, off by default: in a
 60k-step fine-tune from that checkpoint it broke every phase (0/20 even from the plain reset).
+
+The entropy in the critic's target (tower_sac_41283256): SAC's soft value adds -alpha * log pi at every future step.
+Here log pi stays near 5 (the binary gripper saturates tanh) and alpha rose to 0.014, a cost of 0.07 per step, 4-7
+over the critic's 100-step horizon, more than the 3 a protective stop costs and ends. On the script's descent states,
+half of which build the tower, Q fell from +0.15 at 2M steps to -11 at 6M, closing 3-6 cm above the grasp point
+scored above waiting, and from 7M the policy closed on the block's top and pressed it into the table (stage 0
+stopped 100/100). `entropy_backup=False` leaves the entropy out of the target and keeps it in the actor loss, for
+exploration only (SAC-Lite, Yu et al. 2022, "Do you need the entropy reward (in practice)?").
 """
 
 import numpy as np
@@ -118,8 +126,9 @@ class DemoSAC(SAC):
     that `bc_weight` means the same whatever the scale of the returns."""
 
     def __init__(self, *args, bc_weight: float = 1.0, q_filter: bool = False, bc_grip: float = 0.0,
-                 det_weight: float = 0.0, **kwargs):
+                 det_weight: float = 0.0, entropy_backup: bool = True, **kwargs):
         super().__init__(*args, **kwargs)
+        self.entropy_backup = entropy_backup  # False: no -alpha * log pi in the critic's target (SAC-Lite)
         self.bc_weight = bc_weight
         self.q_filter = q_filter
         self.bc_grip = bc_grip  # weight of the gripper in the cloning term during training (pre-training: 1)
@@ -159,6 +168,17 @@ class DemoSAC(SAC):
             losses.append(bc.item())
         return float(np.mean(losses[-100:])) if losses else float("nan")
 
+    @torch.no_grad()
+    def target_q(self, data, ent_coef, discounts):
+        """The critic's target: reward plus the discounted value of the next state, soft (minus alpha * log pi)
+        only with entropy_backup. Models saved before the option load with it on, as they were trained."""
+        next_actions, next_log_prob = self.actor.action_log_prob(data.next_observations)
+        next_q = torch.cat(self.critic_target(data.next_observations, next_actions), dim=1)
+        next_q = torch.min(next_q, dim=1, keepdim=True)[0]
+        if getattr(self, "entropy_backup", True):
+            next_q = next_q - ent_coef * next_log_prob.reshape(-1, 1)
+        return data.rewards + (1 - data.dones) * discounts * next_q
+
     def train(self, gradient_steps: int, batch_size: int = 64) -> None:
         """SB3 2.x SAC.train, plus the behaviour cloning term in the actor loss."""
         self.policy.set_training_mode(True)
@@ -185,11 +205,7 @@ class DemoSAC(SAC):
                 ent_coef = self.ent_coef_tensor
             ent_coefs.append(ent_coef.item())
 
-            with torch.no_grad():
-                next_actions, next_log_prob = self.actor.action_log_prob(data.next_observations)
-                next_q = torch.cat(self.critic_target(data.next_observations, next_actions), dim=1)
-                next_q = torch.min(next_q, dim=1, keepdim=True)[0] - ent_coef * next_log_prob.reshape(-1, 1)
-                target_q = data.rewards + (1 - data.dones) * discounts * next_q
+            target_q = self.target_q(data, ent_coef, discounts)
 
             current_q = self.critic(data.observations, data.actions)
             critic_loss = 0.5 * sum(F.mse_loss(q, target_q) for q in current_q)

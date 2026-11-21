@@ -74,7 +74,25 @@ What it took. Each failed run was the policy reading a shortcut in its observati
 - The wrist close-up of the tower was only ever taken after a carry, so the policy used it as a phase cue and failed whenever it started over the tower, as after its own first placement. Half the episodes now start there; full towers went from 0-7 % to 50 %.
 - Gripper noise: the mean action stayed closed while sampled actions opened by chance. Gripper std capped, gripper left out of the cloning term.
 - After 4M steps the replay buffer (3M) wrapped, the critic loss doubled and towers fell to 9 %. Buffer now 12M, and the best checkpoint is kept.
-- Most failures on the measured blocks were protective stops: grasping 15 mm over the bottom put the palm into the 80 mm black block. The grasp now rises on tall blocks; the next run trains with it.
+- Most failures on the measured blocks were protective stops: grasping 15 mm over the bottom put the palm into the 80 mm black block. The grasp now rises on tall blocks.
+- From 6M steps the policy closed on the top of the block and pressed it into the table (stage-0 stops on 97-100 % of episodes). The entropy term in the critic's target cost 4-7 over an episode, more than the 3 a protective stop costs, so stopping early looked cheap. The target now leaves it out (SAC-Lite, `--entropy-backup` restores plain SAC).
+
+Latest run, with the taller grasp and SAC-Lite (13 h, 8.9M steps; [`tower_sac_lite_eval.json`](../results/tower_sac_lite_eval.json)), 100 towers:
+
+| Model | Full tower, measured blocks | First block | Full tower, random blocks | First block |
+|---|---|---|---|---|
+| Best checkpoint (3M steps) | **60 %** | 62 % | **71 %** | 78 % |
+| Final model (8.9M steps) | 10 % | 61 % | 30 % | 67 % |
+
+The stop collapse is gone (after 6M steps, 15-25 % of the plain-reset first blocks end in a stop instead of 97-100 %), but towers still slide after 7M steps while the entropy coefficient keeps rising (0.005 to 0.018); `best/` keeps the peak. Nearly all failures of the best checkpoint are on the first block: 18 protective stops and 15 timeouts out of 100.
+
+Six consecutive seeds, not picked ([`tower_grid_gif.py`](../scripts/tower_grid_gif.py)). Measured blocks, SAC (3 of 6), then the scripted stack on the same seeds (6 of 6), then SAC on random sizes (4 of 6):
+
+![SAC, measured blocks](../media/tower_sac_measured.gif)
+
+![Scripted stack, measured blocks](../media/tower_script_measured.gif)
+
+![SAC, random block sizes](../media/tower_sac_random.gif)
 
 ## What the simulation taught me
 
